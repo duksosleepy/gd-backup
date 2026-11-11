@@ -13,4 +13,32 @@ export default defineConfig({
   build: {
     outDir: path.resolve('..', 'core', 'static'),
   },
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8100',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://localhost:8100',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
+  },
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8100',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://localhost:8100',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
+  },
 })

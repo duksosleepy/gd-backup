@@ -1,5 +1,5 @@
 ---
-title: "Google Drive Automated Backup Service with Plombery UI"
+title: "Google Drive Automated Backup Service with GD Backup Engine UI"
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-brainstorm
 execution: code
@@ -9,8 +9,8 @@ date: 2026-11-11
 ## Goal Capsule
 
 - **Objective:** Automate directory backups from local storage to Google Drive on a scheduled timeline, while providing a web interface without authentication for schedule monitoring, execution history, live log streaming, and on-demand manual triggers.
-- **Means:** Direct Plombery integration as orchestrator and UI framework running via `uv run backup.py` (KTD1).
-- **Product Authority:** Active scope is the `gd-backup` local-to-Drive backup runner with Plombery UI. In-browser schedule editing, bi-directional sync, and remote file restoration are explicitly out of scope.
+- **Means:** Direct GD Backup Engine integration as orchestrator and UI framework running via `uv run backup.py` (KTD1).
+- **Product Authority:** Active scope is the `gd-backup` local-to-Drive backup runner with GD Backup Engine UI. In-browser schedule editing, bi-directional sync, and remote file restoration are explicitly out of scope.
 - **Open Blockers:** None.
 
 ---
@@ -21,7 +21,7 @@ date: 2026-11-11
 
 ### Summary
 
-A Python backup service in `gd-backup` powered by Plombery and APScheduler that launches via `uv run backup.py`. It syncs files from a designated local folder to Google Drive on an APScheduler timeline configured directly in Python, while serving Plombery's web dashboard without authentication for schedule monitoring, execution history, live log streaming, and manual triggers.
+A Python backup service in `gd-backup` powered by GD Backup Engine and APScheduler that launches via `uv run backup.py`. It syncs files from a designated local folder to Google Drive on an APScheduler timeline configured directly in Python, while serving GD Backup Engine's web dashboard without authentication for schedule monitoring, execution history, live log streaming, and manual triggers.
 
 ### Problem Frame
 
@@ -29,7 +29,7 @@ Managing manual backups of local files to Google Drive is error-prone and lacks 
 
 ### Key Decisions
 
-- **Direct Plombery integration as orchestrator and UI framework** (session-settled: user-directed — chosen over Standalone custom FastAPI app and Custom single-file UI: leverages Plombery to achieve exact UI layout, live WebSocket logs, and APScheduler execution with zero frontend duplication). Governs R1, R2, R3, R8, R9.
+- **Direct GD Backup Engine integration as orchestrator and UI framework** (session-settled: user-directed — chosen over Standalone custom FastAPI app and Custom single-file UI: leverages GD Backup Engine to achieve exact UI layout, live WebSocket logs, and APScheduler execution with zero frontend duplication). Governs R1, R2, R3, R8, R9.
 - **Directory sync as backup mechanism** (session-settled: user-directed — chosen over Timestamped archives and Single file upload: mirrors local files to Google Drive, updating or skipping existing files without inflating cloud storage with duplicate archives). Governs R5, R6.
 - **Pure Python schedule configuration in `backup.py`** (session-settled: user-directed — chosen over Environment variable schedules and Presets: schedule timeline is explicitly declared using APScheduler trigger objects in code). Governs R3.
 - **UI focused on monitoring, logs, and manual runs** (session-settled: user-directed — chosen over Full in-UI management and Status-only dashboard: keeps configuration in code/config while providing immediate manual trigger and observability in the browser). Governs R2, R4, R8, R9.
@@ -40,7 +40,7 @@ Managing manual backups of local files to Google Drive is error-prone and lacks 
 **Application Execution & Packaging**
 
 - R1. The application must start both the scheduler and web server from a single entry point: `uv run backup.py`.
-- R2. The application must serve the Plombery web interface on a local port (defaulting to 8000) accessible without any login or authentication barrier.
+- R2. The application must serve the GD Backup Engine web interface on a local port (defaulting to 8000) accessible without any login or authentication barrier.
 
 **Scheduling & Orchestration**
 
@@ -125,11 +125,11 @@ Managing manual backups of local files to Google Drive is error-prone and lacks 
 
 ### Key Technical Decisions
 
-- **KTD1. Link Plombery via local editable dependency in `pyproject.toml`** (session-settled: user-directed — chosen over Git dependency or vendored fork: allows direct imports from `plombery` while referencing the local repository at `../plombery`, utilizing its prebuilt static assets and FastAPI routers directly). Governs R1, R2.
-- **KTD2. Single-process ASGI lifecycle via Uvicorn in `backup.py`**: The application starts as a unified ASGI process where FastAPI hosts both Plombery's REST routes (`/api`), Socket.IO WebSocket mount (`/ws`), static file delivery (`/`), and the APScheduler background runner. Governs R1, R2, R3, R8.
-- **KTD3. Pydantic Settings for runtime configuration with Pydantic BaseModel for UI input schemas**: Runtime defaults (host, port, credentials file path, default source folder, default Drive folder ID) are managed via `pydantic-settings` reading from `.env`. Plombery input params for manual triggers are declared as a subclass of `pydantic.BaseModel`, allowing Plombery to auto-generate the manual run form (`JsonSchemaForm`) in the UI. Governs R4, R7.
+- **KTD1. Link GD Backup Engine via local editable dependency in `pyproject.toml`** (session-settled: user-directed — chosen over Git dependency or vendored fork: allows direct imports from `gd_backup_engine` while referencing the local repository at `../gd_backup_engine`, utilizing its prebuilt static assets and FastAPI routers directly). Governs R1, R2.
+- **KTD2. Single-process ASGI lifecycle via Uvicorn in `backup.py`**: The application starts as a unified ASGI process where FastAPI hosts both GD Backup Engine's REST routes (`/api`), Socket.IO WebSocket mount (`/ws`), static file delivery (`/`), and the APScheduler background runner. Governs R1, R2, R3, R8.
+- **KTD3. Pydantic Settings for runtime configuration with Pydantic BaseModel for UI input schemas**: Runtime defaults (host, port, credentials file path, default source folder, default Drive folder ID) are managed via `pydantic-settings` reading from `.env`. GD Backup Engine input params for manual triggers are declared as a subclass of `pydantic.BaseModel`, allowing GD Backup Engine to auto-generate the manual run form (`JsonSchemaForm`) in the UI. Governs R4, R7.
 - **KTD4. In-place Google Drive file updates via MD5 checksum and metadata lookup**: During sync, the service lists remote files in the target parent folder. Before uploading, each local file's MD5 checksum and modified time are compared against Drive file metadata (`md5Checksum`). If identical, the upload is skipped; if modified, `files().update` is called with `media_body=MediaFileUpload(...)`; if missing, `files().create` is called. Governs R5, R6.
-- **KTD5. Plombery LoggerAdapter for contextual streaming logs**: In tasks, logging utilizes Plombery's `get_logger()` instead of standard `print()`. This automatically captures log records into SQLite and broadcasts them through the active Socket.IO connection to the live frontend LogViewer component. Governs R8.
+- **KTD5. GD Backup Engine LoggerAdapter for contextual streaming logs**: In tasks, logging utilizes GD Backup Engine's `get_logger()` instead of standard `print()`. This automatically captures log records into SQLite and broadcasts them through the active Socket.IO connection to the live frontend LogViewer component. Governs R8.
 
 ### High-Level Technical Design
 
@@ -138,15 +138,15 @@ flowchart TD
     subgraph CLI["uv run backup.py"]
         ENTRY["backup.py main()"] --> LOAD_CONF["Load Config (.env)"]
         LOAD_CONF --> INIT_AUTH["Ensure OAuth (token.json)"]
-        INIT_AUTH --> REG_PIPE["Register Plombery Pipeline & APScheduler Trigger"]
-        REG_PIPE --> UVICORN["uvicorn.run(plombery:get_app)"]
+        INIT_AUTH --> REG_PIPE["Register GD Backup Engine Pipeline & APScheduler Trigger"]
+        REG_PIPE --> UVICORN["uvicorn.run(gd_backup_engine:get_app)"]
     end
 
-    subgraph Backend["Plombery ASGI / FastAPI Backend (:8000)"]
+    subgraph Backend["GD Backup Engine ASGI / FastAPI Backend (:8000)"]
         UVICORN --> FASTAPI["FastAPI App"]
         FASTAPI --> REST["/api/pipelines & /api/runs"]
         FASTAPI --> WS["/ws (Socket.IO Live Logs)"]
-        FASTAPI --> STATIC["/ (SPA Static Files - Plombery UI)"]
+        FASTAPI --> STATIC["/ (SPA Static Files - GD Backup Engine UI)"]
         FASTAPI --> ORCH["_Orchestrator & APScheduler"]
     end
 
@@ -159,7 +159,7 @@ flowchart TD
     end
 
     subgraph Browser["Browser Client (Unauthenticated)"]
-        STATIC --> UI["Plombery React / Tremor UI"]
+        STATIC --> UI["GD Backup Engine React / Tremor UI"]
         UI <--> REST
         UI <--> WS
     end
@@ -168,15 +168,15 @@ flowchart TD
 ### Assumptions
 
 - The user environment has a browser capable of completing the initial Google OAuth flow once to create `token.json` using `credentials.json`.
-- Plombery's frontend static assets in `/home/duk/code/plombery/src/plombery/static` are compiled and present (built via `pnpm build`).
+- GD Backup Engine's frontend static assets in `/home/duk/code/gd_backup_engine/src/gd_backup_engine/static` are compiled and present (built via `pnpm build`).
 - Google Drive OAuth credentials have or will be granted the `https://www.googleapis.com/auth/drive.file` scope so the app can manage uploaded files.
 
 ---
 
 ## Implementation Units
 
-### U1. Project Configuration & Plombery Dependency Wiring
-- **Goal:** Configure `gd-backup/pyproject.toml` to link `plombery` as a local editable source dependency, add Google Drive API client packages, and configure pytest tooling.
+### U1. Project Configuration & GD Backup Engine Dependency Wiring
+- **Goal:** Configure `gd-backup/pyproject.toml` to link `gd_backup_engine` as a local editable source dependency, add Google Drive API client packages, and configure pytest tooling.
 - **Requirements:** R1, R2 (cites KTD1)
 - **Dependencies:** None
 - **Files:**
@@ -185,20 +185,20 @@ flowchart TD
   - `.gitignore`
 - **Approach:**
   1. Update `pyproject.toml` dependencies with:
-     - `plombery`
+     - `gd_backup_engine`
      - `google-api-python-client>=2.100.0`
      - `google-auth-httplib2>=0.2.0`
      - `google-auth-oauthlib>=1.2.0`
      - `pydantic-settings>=2.6.0`
      - `python-dotenv>=1.0.0`
      - Dev dependencies: `pytest>=8.0.0`, `pytest-asyncio>=0.23.0`
-  2. Declare `[tool.uv.sources]` specifying `plombery = { path = "../plombery", editable = true }`.
+  2. Declare `[tool.uv.sources]` specifying `gd_backup_engine = { path = "../gd_backup_engine", editable = true }`.
   3. Create `.env.example` documenting `SOURCE_DIR`, `GDRIVE_FOLDER_ID`, `HOST`, `PORT`, and credential file locations.
   4. Ensure `.gitignore` ignores `token.json`, `credentials.json`, `.env`, and SQLite database files (`*.db`).
-- **Patterns to follow:** Plombery's `pyproject.toml` dependency and uv source declarations.
+- **Patterns to follow:** GD Backup Engine's `pyproject.toml` dependency and uv source declarations.
 - **Test scenarios:**
   1. `uv sync` resolves and installs dependencies without version conflicts.
-  2. `uv run python -c "import plombery; print(plombery.__version__)"` executes and prints Plombery's version.
+  2. `uv run python -c "import gd_backup_engine; print(gd_backup_engine.__version__)"` executes and prints GD Backup Engine's version.
 
 ### U2. Backup Configuration & OAuth Authentication Manager
 - **Goal:** Implement structured settings loading via Pydantic and an OAuth credential manager that supports initial authorization and background token refreshing.
@@ -233,7 +233,7 @@ flowchart TD
 - **Files:**
   - `drive_sync.py`
 - **Approach:**
-  1. Build `DriveSyncEngine` initialized with authenticated Google Drive service and Plombery logger.
+  1. Build `DriveSyncEngine` initialized with authenticated Google Drive service and GD Backup Engine logger.
   2. Implement `list_remote_files(folder_id: str) -> dict[str, dict]`:
      - Queries `service.files().list(q="'{folder_id}' in parents and trashed = false", fields="files(id, name, md5Checksum, modifiedTime, size)")`.
      - Maps filename to remote metadata.
@@ -252,15 +252,15 @@ flowchart TD
   3. Existing local file with differing MD5 calls `update()` on the existing Drive file ID.
   4. Non-existent local directory raises clear error caught and logged.
 
-### U4. Plombery Pipeline, Scheduler & Application Entry Point
-- **Goal:** Integrate the sync task into a Plombery Pipeline, attach the APScheduler trigger in Python, and configure `backup.py` to launch the Uvicorn web server hosting Plombery's unauthenticated dashboard.
+### U4. GD Backup Engine Pipeline, Scheduler & Application Entry Point
+- **Goal:** Integrate the sync task into a GD Backup Engine Pipeline, attach the APScheduler trigger in Python, and configure `backup.py` to launch the Uvicorn web server hosting GD Backup Engine's unauthenticated dashboard.
 - **Requirements:** R1, R2, R3, R4, R8, R9 (cites KTD1, KTD2, KTD3, KTD5)
 - **Dependencies:** U2, U3
 - **Files:**
   - `backup.py`
 - **Approach:**
   1. Define `@task` function `async def backup_task(params: BackupInputParams)` in `backup.py`:
-     - Fetches Plombery logger via `get_logger()`.
+     - Fetches GD Backup Engine logger via `get_logger()`.
      - Resolves effective `source_dir` and `gdrive_folder_id` (using `params` overrides if supplied, falling back to `settings`).
      - Initializes `DriveSyncEngine` and runs `sync_directory`.
      - Returns summary dictionary.
@@ -271,12 +271,12 @@ flowchart TD
      - `tasks=[backup_task]`
      - `params=BackupInputParams`
      - `triggers=[Trigger(id="scheduled_sync", name="Scheduled Sync", schedule=IntervalTrigger(hours=24))]`
-  3. Expose `app = get_app()` from `plombery`.
+  3. Expose `app = get_app()` from `gd_backup_engine`.
   4. In `if __name__ == "__main__":`, run `uvicorn.run("backup:app", host=settings.host, port=settings.port, reload=False)`.
-- **Patterns to follow:** Plombery `examples/src/sales_pipeline.py` and `examples/src/app.py`.
+- **Patterns to follow:** GD Backup Engine `examples/src/sales_pipeline.py` and `examples/src/app.py`.
 - **Test scenarios:**
   1. `backup.py` registers `google_drive_backup` pipeline with the expected task and trigger.
-  2. Plombery FastAPI app mounts static files from Plombery without authentication routes gating dashboard access.
+  2. GD Backup Engine FastAPI app mounts static files from GD Backup Engine without authentication routes gating dashboard access.
   3. `uv run backup.py --help` or import check passes without errors.
 
 ### U5. Automated Test Suite & Verification
@@ -292,13 +292,13 @@ flowchart TD
   1. In `tests/conftest.py`, define fixtures for temporary directories with dummy files, mocked Drive API service, and test settings.
   2. In `tests/test_config.py`, verify `BackupSettings` and `BackupInputParams` validation and environment loading.
   3. In `tests/test_drive_sync.py`, test `DriveSyncEngine` actions: create on missing, update on modified, skip on identical MD5.
-  4. In `tests/test_pipeline.py`, verify pipeline registration, trigger association, and Plombery app retrieval.
+  4. In `tests/test_pipeline.py`, verify pipeline registration, trigger association, and GD Backup Engine app retrieval.
 - **Patterns to follow:** Pytest standard patterns with unittest.mock for Google API client.
 - **Test scenarios:**
   1. `test_sync_new_file`: creates new file on Drive mock.
   2. `test_sync_modified_file`: updates existing file on Drive mock.
   3. `test_sync_unchanged_file`: skips upload when MD5 matches.
-  4. `test_pipeline_registered`: checks `plombery.orchestrator.orchestrator.pipelines["google_drive_backup"]` exists and has correct triggers.
+  4. `test_pipeline_registered`: checks `gd_backup_engine.orchestrator.orchestrator.pipelines["google_drive_backup"]` exists and has correct triggers.
 
 ---
 
@@ -308,7 +308,7 @@ flowchart TD
 
 | Phase | Command | Purpose |
 |---|---|---|
-| Dependency Validation | `uv sync` | Ensure all dependencies and local plombery link resolve |
+| Dependency Validation | `uv sync` | Ensure all dependencies and local gd_backup_engine link resolve |
 | Unit & Integration Tests | `uv run pytest` | Run full test suite with mocked Drive API |
 | Code Quality & Lint | `uv run ruff check .` (or `flake8`) | Validate code style and clean imports |
 | Startup Smoke Test | `uv run python -c "import backup; assert backup.app is not None"` | Verify pipeline and ASGI app load cleanly |
@@ -318,7 +318,7 @@ flowchart TD
 
 1. Start application via `uv run backup.py`.
 2. Open browser at `http://localhost:8000`.
-3. Confirm Plombery UI loads immediately without login/authentication prompt.
+3. Confirm GD Backup Engine UI loads immediately without login/authentication prompt.
 4. Verify the "Google Drive Backup" pipeline is displayed with its "Scheduled Sync" trigger.
 5. Click "Run" button to execute manual run with default parameters.
 6. Observe live log streaming showing files being evaluated and synced.
@@ -328,7 +328,7 @@ flowchart TD
 
 ## Definition of Done
 
-- [ ] `pyproject.toml` contains all required dependencies and links `plombery` as editable local source.
+- [ ] `pyproject.toml` contains all required dependencies and links `gd_backup_engine` as editable local source.
 - [ ] `uv run backup.py` starts the server and scheduler from a single command.
 - [ ] Web dashboard opens without login, displaying pipeline, trigger, run history, and live logs.
 - [ ] Directory sync handles new files, updates modified files, and skips unchanged files based on MD5 checksums.

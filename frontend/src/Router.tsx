@@ -10,10 +10,10 @@ import {
 import { useAuthState } from '@/contexts/AuthContext'
 
 const ProtectedRoute: React.FC<PropsWithChildren> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthState()
+  const { isAuthenticated, isAuthenticationEnabled, isLoading } = useAuthState()
   const location = useLocation()
 
-  if (!isAuthenticated && !isLoading) {
+  if (isAuthenticationEnabled && !isAuthenticated && !isLoading) {
     return <Navigate to="/login" replace state={{ from: location }} />
   }
 
@@ -54,6 +54,7 @@ const Router = () => {
       {routes.map((route) => (
         <Route path={route.path} element={route.element} key={route.path} />
       ))}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

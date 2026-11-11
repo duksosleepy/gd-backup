@@ -40,9 +40,7 @@ class ApiHttpError extends Error implements BaseError {
   }
 }
 
-const DEFAULT_BASE_URL = import.meta.env.DEV
-  ? 'http://localhost:8000/api'
-  : `${window.location.protocol}//${window.location.host}/api`
+const DEFAULT_BASE_URL = '/api'
 const BASE_URL: string = import.meta.env.VITE_API_BASE_URL || DEFAULT_BASE_URL
 
 const client = ky.create({
@@ -89,8 +87,8 @@ const post = async <ResponseType = any>(
 }
 
 export const getWebsocketUrl = () => {
-  const url = new URL(BASE_URL)
-  url.pathname = url.pathname.replace(/api$/, '')
+  const url = new URL(BASE_URL, window.location.origin)
+  url.pathname = url.pathname.replace(/\/api\/?$/, '')
   return url
 }
 

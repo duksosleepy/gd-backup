@@ -17,17 +17,20 @@ type AuthState = {
 
 type Action =
   | { type: 'LOGIN'; payload: { user: User; isAuthenticationEnabled: boolean } }
+  | { type: 'DISABLE_AUTH' }
   | { type: 'POPULATE'; payload: User }
   | { type: 'LOGOUT' }
   | { type: 'STOP_LOADING' }
 
-const StateContext = createContext<AuthState>({
-  isAuthenticated: false,
-  isAuthenticationEnabled: true,
-  isLoading: true,
+const initialState: AuthState = {
+  isAuthenticated: true,
+  isAuthenticationEnabled: false,
+  isLoading: false,
   logout: async () => {},
   user: null,
-})
+}
+
+const StateContext = createContext<AuthState>(initialState)
 
 const reducer = (state: AuthState, action: Action): AuthState => {
   switch (action.type) {
@@ -37,6 +40,13 @@ const reducer = (state: AuthState, action: Action): AuthState => {
         isAuthenticated: true,
         isAuthenticationEnabled: action.payload.isAuthenticationEnabled,
         user: action.payload.user,
+      }
+    case 'DISABLE_AUTH':
+      return {
+        ...state,
+        isAuthenticated: true,
+        isAuthenticationEnabled: false,
+        user: null,
       }
     case 'LOGOUT':
       return {
@@ -65,33 +75,26 @@ const reducer = (state: AuthState, action: Action): AuthState => {
 }
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [state, dispatch] = useReducer(reducer, {
-    isAuthenticated: false,
-    isAuthenticationEnabled: true,
-    isLoading: true,
-    logout: async () => {
-      await logout()
-      dispatch({ type: 'LOGOUT' })
-    },
-    user: null,
-  })
+  const [state, dispatch] = useReducer(reducer, initialState)
 
   useEffect(() => {
     const loadUser = async () => {
       try {
         const { is_authentication_enabled, user } = await getCurrentUser()
 
-        if ((is_authentication_enabled && user) || !is_authentication_enabled) {
+        if (is_authentication_enabled && user) {
           dispatch({
             type: 'LOGIN',
             payload: {
               user,
-              isAuthenticationEnabled: is_authentication_enabled,
+              isAuthenticationEnabled: true,
             },
           })
+        } else {
+          dispatch({ type: 'DISABLE_AUTH' })
         }
-      } catch (err) {
-        console.error(err)
+      } catch {
+        dispatch({ type: 'DISABLE_AUTH' })
       } finally {
         dispatch({ type: 'STOP_LOADING' })
       }
@@ -102,9 +105,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <StateContext.Provider value={state}>
-      {state.isAuthenticationEnabled && state.isLoading
-        ? 'Loading...'
-        : children}
+      {children}
     </StateContext.Provider>
   )
 }
