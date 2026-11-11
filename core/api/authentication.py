@@ -1,0 +1,167 @@
+from typing import Any
+
+from authlib.integrations.starlette_client import OAuth, StarletteOAuth2App
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
+from httpx2 import HTTPStatusError
+from pydantic import BaseModel, HttpUrl
+from starlette.middleware.sessions import SessionMiddleware
+
+from core.auth.providers import get_provider_config
+from core.config import settings
+
+
+class WhoamiResponse(BaseModel):
+    """The user the current session belongs to, if any."""
+
+    user: dict[str, Any] | None = None
+    is_authentication_enabled: bool
+
+
+class AuthProvider(BaseModel):
+    """An OAuth provider the frontend can offer to sign in with."""
+
+    id: str
+    name: str
+    redirect_url: str
+
+
+def build_auth_router(app: FastAPI) -> APIRouter:
+    router = APIRouter(
+        prefix="/auth",
+        tags=["Authentication"],
+    )
+
+    if not settings.auth:
+        # If authentication is not enabled, register a
+        # dummy endpoint to return an empty user
+
+        @router.get("/whoami", description="Get the currently authenticated user")
+        async def get_current_user_no_auth(request: Request) -> WhoamiResponse:
+            return WhoamiResponse(user=None, is_authentication_enabled=False)
+
+        return router
+
+    app.add_middleware(
+        SessionMiddleware, secret_key=settings.auth.secret_key.get_secret_value()
+    )
+
+    # `provider` is optional: a configuration can declare the OAuth endpoints
+    # itself instead of naming a preset
+    provider_id = settings.auth.provider or "generic"
+    provider_config = get_provider_config(provider_id)
+
+    if not provider_config:
+        raise ValueError(
+            f"Unsupported authentication provider: {settings.auth.provider}"
+        )
+
+    # A preset only fills in what the configuration left out, so a value set
+    # explicitly always wins. Assigning unconditionally is what made
+    # `provider: google` discard the `client_kwargs` carrying its scope, and
+    # `provider: generic` wipe the very `server_metadata_url` it was given.
+    if settings.auth.server_metadata_url is None:
+        if metadata_url := provider_config.get("metadata_url"):
+            settings.auth.server_metadata_url = HttpUrl(str(metadata_url))
+
+    if settings.auth.client_kwargs is None:
+        settings.auth.client_kwargs = provider_config.get("client_kwargs")
+
+    # Explicitly convert the URL objects to str as from Pydantic v2 they're not converted automatically
+    # and Authlib complains
+    server_metadata_url = (
+        str(settings.auth.server_metadata_url)
+        if settings.auth.server_metadata_url
+        else None
+    )
+    access_token_url = (
+        str(settings.auth.access_token_url) if settings.auth.access_token_url else None
+    )
+    authorize_url = (
+        str(settings.auth.authorize_url) if settings.auth.authorize_url else None
+    )
+    jwks_uri = str(settings.auth.jwks_uri) if settings.auth.jwks_uri else None
+
+    oauth = OAuth()
+    oauth.register(
+        name="default",
+        client_id=settings.auth.client_id.get_secret_value(),
+        client_secret=settings.auth.client_secret.get_secret_value(),
+        server_metadata_url=server_metadata_url,
+        access_token_url=access_token_url,
+        authorize_url=authorize_url,
+        jwks_uri=jwks_uri,
+        client_kwargs=settings.auth.client_kwargs,
+    )
+
+    if not oauth.default:
+        raise ValueError("Error registering OAuth client")
+
+    oauth_client: StarletteOAuth2App = oauth.default
+
+    @router.get("/login", description="Start the OAuth login flow")
+    async def login(request: Request) -> RedirectResponse:
+        redirect_uri = request.url_for("auth_redirect")
+
+        try:
+            return await oauth_client.authorize_redirect(request, redirect_uri)
+        except HTTPStatusError as e:
+            print(f"Unable to authenticate. Error: {e}")
+            raise HTTPException(401, "Unable to authenticate") from e
+
+    @router.post("/logout", description="Clear the current session")
+    async def logout(request: Request) -> None:
+        request.session.pop("user", None)
+
+    @router.get("/whoami", description="Get the currently authenticated user")
+    async def get_current_user(request: Request) -> WhoamiResponse:
+        return WhoamiResponse(
+            user=request.session.get("user"), is_authentication_enabled=True
+        )
+
+    @router.get("/providers", description="List the available OAuth providers")
+    async def get_providers() -> list[AuthProvider]:
+        if not settings.auth:
+            return []
+
+        return [
+            AuthProvider(
+                id=provider_id,
+                name=provider_config["name"],
+                redirect_url="/api/auth/redirect",
+            )
+        ]
+
+    @router.get("/redirect", description="OAuth callback, redirects to the frontend")
+    async def auth_redirect(request: Request) -> RedirectResponse:
+        try:
+            token: dict = await oauth_client.authorize_access_token(request)
+        except Exception as e:
+            print(f"Unable to authenticate. Error: {e}")
+            raise HTTPException(401, "Unable to authenticate") from e
+
+        user = token.get("userinfo")
+
+        if not user:
+            raise HTTPException(401, "Unable to authenticate. Error: No user info")
+
+        request.session["user"] = dict(user)
+
+        return RedirectResponse(url=str(settings.frontend_url))
+
+    return router
+
+
+async def _needs_auth(request: Request):
+    if not settings.auth:
+        return None
+
+    user = request.session.get("user")
+
+    if not user:
+        raise HTTPException(401, "You must be authenticated to access this API route")
+
+    return user
+
+
+NeedsAuth = Depends(_needs_auth)

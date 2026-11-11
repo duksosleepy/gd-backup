@@ -1,0 +1,56 @@
+{
+  "name": "gd-backup",
+  "version": "0.6.0-beta4",
+  "description": "",
+  "license": "MIT",
+  "author": {
+    "name": "Luca Faggianelli",
+    "email": "luca@velvetlab.tech",
+    "url": "https://lucafaggianelli.github.io/gd_backup/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lucafaggianelli/gd_backup"
+  },
+  "type": "module",
+  "packageManager": "pnpm@10.19.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build --emptyOutDir",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
+    "@floating-ui/react": "^0.27.20",
+    "@headlessui/react": "^2.2.10",
+    "@heroicons/react": "^2.2.0",
+    "@microlink/react-json-view": "^1.31.31",
+    "@tanstack/react-query": "^5.102.8",
+    "@tanstack/react-virtual": "^3.14.10",
+    "@tremor/react": "^3.18.7",
+    "@xyflow/react": "^12.11.5",
+    "date-fns": "^4.4.0",
+    "ky": "^2.1.0",
+    "lucide-react": "^1.38.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router": "^8.3.1",
+    "react-syntax-highlighter": "^16.1.1",
+    "socket.io-client": "^4.8.3",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@headlessui/tailwindcss": "^0.2.2",
+    "@types/json-schema": "^7.0.15",
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}
