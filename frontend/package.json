@@ -13,7 +13,7 @@
     "url": "https://github.com/lucafaggianelli/gd_backup"
   },
   "type": "module",
-  "packageManager": "pnpm@10.19.0",
+  "packageManager": "pnpm@10.33.2",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build --emptyOutDir",
@@ -52,5 +52,8 @@
     "tailwindcss": "^3.4.19",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
+  },
+  "engines": {
+    "pnpm": ">=10"
   }
 }
