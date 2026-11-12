@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 UTC_PLUS_7 = timezone(timedelta(hours=7))
 
 
-def current_month_folder_name(fmt: str = "%Y-%m", now: Optional[datetime] = None) -> str:
+def current_month_folder_name(fmt: str = "%m", now: Optional[datetime] = None) -> str:
     """Month folder name based on the current date in UTC+7."""
     return (now or datetime.now(UTC_PLUS_7)).astimezone(UTC_PLUS_7).strftime(fmt)
 
@@ -73,7 +73,7 @@ class JobConfig(BaseModel):
         description="Optional Google Drive parent folder ID (None uses configured root)",
     )
     month_folder_format: Optional[str] = Field(
-        default="%Y-%m",
+        default="%m",
         description="strftime format of the per-month subfolder (UTC+7). Empty disables it.",
     )
     schedule_hours: Optional[int] = Field(
