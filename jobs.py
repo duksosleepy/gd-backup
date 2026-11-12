@@ -163,7 +163,7 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
     task_slug = "".join(c if c.isalnum() else "_" for c in task_name.lower()).strip("_")
     task_id = f"{job.id.lower()}_{task_slug}"
 
-    async def run_backup_source(params: Optional[JobRunParams] = None) -> dict:
+    def run_backup_source(params: Optional[JobRunParams] = None) -> dict:
         log = get_logger()
         log.info("=" * 60)
         log.info("[%s] Processing source: %s", job.name, task_name)

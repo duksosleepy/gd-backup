@@ -23,6 +23,7 @@ def test_sync_directory_new_files(mock_drive_service, sample_backup_dir: Path):
 
     # Mock create returns an ID
     mock_files.create.return_value.execute.return_value = {"id": "new_created_file_id", "name": "sample"}
+    mock_files.create.return_value.next_chunk.return_value = (None, {"id": "new_created_file_id", "name": "sample"})
 
     summary = engine.sync_directory(sample_backup_dir, target_folder_id="root_folder")
 
@@ -79,7 +80,7 @@ def test_sync_directory_updates_modified_files(mock_drive_service, sample_backup
         ],
         "nextPageToken": None,
     }
-    mock_files.update.return_value.execute.return_value = {"id": "id_file1", "name": "file1.txt"}
+    mock_files.update.return_value.next_chunk.return_value = (None, {"id": "id_file1", "name": "file1.txt"})
 
     summary = engine.sync_directory(sample_backup_dir, target_folder_id="target_dir")
 

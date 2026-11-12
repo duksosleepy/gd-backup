@@ -11,6 +11,9 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
+UPLOAD_CHUNK_SIZE = 32 * 1024 * 1024  # must be a multiple of 256 KiB
+
+
 class SyncSummary(BaseModel):
     """Execution summary of the directory synchronization process."""
 
@@ -64,7 +67,7 @@ class DriveSyncEngine:
                     pageToken=page_token,
                     pageSize=1000,
                 )
-                .execute()
+                .execute(num_retries=5)
             )
 
             for item in response.get("files", []):
@@ -87,7 +90,7 @@ class DriveSyncEngine:
         else:
             query = f"'root' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '{folder_name}' and trashed = false"
 
-        response = self.service.files().list(q=query, fields="files(id, name)").execute()
+        response = self.service.files().list(q=query, fields="files(id, name)").execute(num_retries=5)
         files = response.get("files", [])
 
         if files:
@@ -103,11 +106,24 @@ class DriveSyncEngine:
         if parent_id:
             body["parents"] = [parent_id]
 
-        created = self.service.files().create(body=body, fields="id").execute()
+        created = self.service.files().create(body=body, fields="id").execute(num_retries=5)
         folder_id = created["id"]
         self.log.info("Created Google Drive folder '%s' (ID: %s)", folder_name, folder_id)
         self._folder_cache[cache_key] = folder_id
         return folder_id
+
+    def _upload_with_progress(self, request, filename: str, file_size: int) -> Dict[str, Any]:
+        """Run a resumable upload chunk by chunk, retrying transient errors."""
+        response = None
+        last_pct = -1
+        while response is None:
+            status, response = request.next_chunk(num_retries=5)
+            if status:
+                pct = int(status.progress() * 100)
+                if pct // 10 != last_pct // 10:
+                    self.log.info("Uploading '%s': %d%%", filename, pct)
+                    last_pct = pct
+        return response
 
     def sync_file(
         self,
@@ -140,12 +156,13 @@ class DriveSyncEngine:
 
             # File modified - update in place
             self.log.info("Updating existing file '%s' on Google Drive (ID: %s)...", filename, remote_item["id"])
-            media = MediaFileUpload(str(local_file), mimetype=mime_type, resumable=True)
-            self.service.files().update(
+            media = MediaFileUpload(str(local_file), mimetype=mime_type, resumable=True, chunksize=UPLOAD_CHUNK_SIZE)
+            request = self.service.files().update(
                 fileId=remote_item["id"],
                 media_body=media,
                 fields="id, name, md5Checksum",
-            ).execute()
+            )
+            self._upload_with_progress(request, filename, file_size)
             self.log.info("Successfully updated '%s'", filename)
             summary.files_updated += 1
             summary.bytes_transferred += file_size
@@ -156,12 +173,11 @@ class DriveSyncEngine:
             if parent_folder_id:
                 body["parents"] = [parent_folder_id]
 
-            media = MediaFileUpload(str(local_file), mimetype=mime_type, resumable=True)
-            created = (
-                self.service.files()
-                .create(body=body, media_body=media, fields="id, name, md5Checksum")
-                .execute()
+            media = MediaFileUpload(str(local_file), mimetype=mime_type, resumable=True, chunksize=UPLOAD_CHUNK_SIZE)
+            request = self.service.files().create(
+                body=body, media_body=media, fields="id, name, md5Checksum"
             )
+            created = self._upload_with_progress(request, filename, file_size)
             self.log.info("Successfully uploaded '%s' (ID: %s)", filename, created.get("id"))
             summary.files_uploaded += 1
             summary.bytes_transferred += file_size

@@ -6,6 +6,8 @@ from typing import Optional
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+import google_auth_httplib2
+import httplib2
 from googleapiclient.discovery import Resource, build
 
 from config import BackupSettings, settings
@@ -77,4 +79,7 @@ def get_drive_service(
         credentials_file=credentials_file,
         token_file=token_file,
     )
-    return build("drive", "v3", credentials=creds)
+    # Default httplib2 timeout is 60s, too short for TLS handshakes on a busy
+    # link while uploading multi-GB files.
+    http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=300))
+    return build("drive", "v3", http=http, cache_discovery=False)

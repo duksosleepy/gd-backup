@@ -17,7 +17,7 @@ from jobs import create_job_pipeline, load_all_jobs
 
 
 @task
-async def sync_google_drive(params: BackupInputParams) -> dict:
+def sync_google_drive(params: BackupInputParams) -> dict:
     """Task that synchronizes the local directory to Google Drive."""
     log = get_logger()
     log.info("Starting Google Drive backup task...")
