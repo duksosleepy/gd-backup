@@ -224,16 +224,21 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
         )
         engine = DriveSyncEngine(service=service, log=log)
 
-        # Get or create target folder in Google Drive
-        backup_folder_id = engine.get_or_create_subfolder(
-            folder_name=effective_target_folder,
-            parent_id=effective_parent_id,
-        )
-        log.info(
-            "Destination Google Drive folder '%s' ID: %s",
-            effective_target_folder,
-            backup_folder_id,
-        )
+        # If a Drive folder ID was given (UI / job / settings), that folder is
+        # the destination itself. Otherwise fall back to the named target folder.
+        if effective_parent_id and not (params and params.target_folder):
+            backup_folder_id = effective_parent_id
+            log.info("Using given Google Drive folder ID: %s", backup_folder_id)
+        else:
+            backup_folder_id = engine.get_or_create_subfolder(
+                folder_name=effective_target_folder,
+                parent_id=effective_parent_id,
+            )
+            log.info(
+                "Destination Google Drive folder '%s' ID: %s",
+                effective_target_folder,
+                backup_folder_id,
+            )
 
         # Put the file in a folder named after the current month (UTC+7),
         # reusing it if it already exists.
