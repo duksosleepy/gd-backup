@@ -95,15 +95,20 @@ Each configured job provides:
 
 ---
 
-## Running as a Service with Mise Daemons (Production)
+## Running as a Service with Mise Daemons (Production & Windows)
 
-This project is configured with [`mise daemons`](https://mise.jdx.dev) and Pitchfork for supervised background process management in production:
+This project is configured with [`mise daemons`](https://mise.jdx.dev) and Pitchfork for supervised background process management in production, **fully compatible with Windows OS** as well as Linux and macOS.
 
-### 1. Services Defined
+### 1. Windows Compatibility Design
+- **No POSIX `exec`**: Commands execute natively via `cmd /C` on Windows without Unix-only shell built-ins.
+- **Native TCP Socket Probing**: Replaced shell-dependent `curl` commands with native TCP socket checks (`ready_port = 8100`, `ready_port = 4173`), preventing PowerShell alias incompatibilities (`Invoke-WebRequest`).
+- **Windows Paths**: Windows drive paths (such as `E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM`) are parsed natively with standard `pathlib.Path`.
+
+### 2. Services Defined
 - **`backup`**: The Python FastAPI service + APScheduler background runner on port `8100` (`http://localhost:8100`).
 - **`frontend`**: The production web dashboard on port `4173` (`http://localhost:4173`), with live reverse proxying of API and WebSockets to the backend. It automatically depends on `backup` being healthy before starting.
 
-### 2. Service Management Commands
+### 3. Service Management Commands (PowerShell / CMD / Bash)
 
 ```bash
 # Start all services in production mode
@@ -123,6 +128,13 @@ You can also run with explicit environment overlay:
 ```bash
 mise -E production daemons start
 ```
+
+### 4. Windows Helper Scripts
+For convenience on Windows, you can double-click or run from CMD / PowerShell:
+- `start_daemons.bat`: Starts the background daemons using `mise daemons start`.
+- `status_daemons.bat`: Checks daemon statuses (`mise daemons status`).
+- `stop_daemons.bat`: Stops all background daemons (`mise daemons stop`).
+- `run_backup.bat`: Runs standalone directly via `uv run backup.py`.
 
 ---
 

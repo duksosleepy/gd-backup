@@ -4,7 +4,7 @@ experimental = true
 [tools]
 pitchfork = "2.32.2"
 pnpm = "10.33.2"
-python = "3.14.6"
+python = "3.13"
 uv = "latest"
 
 [env]
@@ -31,15 +31,25 @@ run = "uv run pytest"
 description = "Start all services in production"
 run = "mise daemons start"
 
+[tasks.stop]
+description = "Stop all background services"
+run = "mise daemons stop"
+
+[tasks.status]
+description = "Check status of background services"
+run = "mise daemons status"
+
+[tasks.logs]
+description = "Stream logs from background services"
+run = "mise daemons logs -f"
+
 [daemons.backup]
-run = "exec uv run backup.py"
+run = "uv run backup.py"
 ready_port = 8100
-ready_cmd = "curl -fsS http://127.0.0.1:8100/api/auth/whoami"
 
 [daemons.frontend]
 dir = "frontend"
-run = "exec pnpm exec vite preview --host 0.0.0.0 --port 4173 --outDir ../core/static"
+run = "pnpm exec vite preview --host 0.0.0.0 --port 4173 --outDir ../core/static"
 ready_port = 4173
-ready_cmd = "curl -fsS http://127.0.0.1:4173/"
 depends = ["backup"]
 
