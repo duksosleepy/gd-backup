@@ -16,17 +16,21 @@ logger = logging.getLogger(__name__)
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 
-def get_drive_credentials(app_settings: Optional[BackupSettings] = None) -> Credentials:
+def get_drive_credentials(
+    app_settings: Optional[BackupSettings] = None,
+    credentials_file: Optional[Path | str] = None,
+    token_file: Optional[Path | str] = None,
+) -> Credentials:
     """Load, refresh, or initiate Google Drive OAuth credentials.
 
-    If token.json exists, load credentials from it. If expired, automatically
+    If token_file exists, load credentials from it. If expired, automatically
     refresh them. If not present, initiate the local server authorization flow
-    using credentials.json and save the newly minted token.
+    using credentials_file and save the newly minted token.
     """
     cfg = app_settings or settings
     creds: Optional[Credentials] = None
-    token_path = Path(cfg.token_file)
-    creds_path = Path(cfg.credentials_file)
+    token_path = Path(token_file) if token_file else Path(cfg.token_file)
+    creds_path = Path(credentials_file) if credentials_file else Path(cfg.credentials_file)
 
     if token_path.exists():
         try:
@@ -62,7 +66,15 @@ def get_drive_credentials(app_settings: Optional[BackupSettings] = None) -> Cred
     return creds
 
 
-def get_drive_service(app_settings: Optional[BackupSettings] = None) -> Resource:
+def get_drive_service(
+    app_settings: Optional[BackupSettings] = None,
+    credentials_file: Optional[Path | str] = None,
+    token_file: Optional[Path | str] = None,
+) -> Resource:
     """Build and return an authenticated Google Drive v3 service client."""
-    creds = get_drive_credentials(app_settings)
+    creds = get_drive_credentials(
+        app_settings=app_settings,
+        credentials_file=credentials_file,
+        token_file=token_file,
+    )
     return build("drive", "v3", credentials=creds)

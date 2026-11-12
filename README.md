@@ -63,6 +63,38 @@ Access the web dashboard in your browser:
 
 ---
 
+## Custom Backup Jobs (`jobs.yaml`)
+
+Backup jobs are configured via [`jobs.yaml`](file:///home/duk/code/gd-backup/jobs.yaml). The service reads this file on startup and automatically constructs an independent orchestrator pipeline, scheduler trigger, and dashboard interface for each job.
+
+### Example: `L60SANGTAM`
+```yaml
+jobs:
+  - id: "L60SANGTAM"
+    name: "L60SANGTAM"
+    description: "Backup latest .zip from L60SANGTAM_HRM and L60SANGTAM databases to Google Drive"
+    credentials_file: "credentials.json"
+    token_file: "token.json"
+    target_folder: "backup"
+    schedule_hours: 24
+    enabled: true
+    sources:
+      - name: "L60SANGTAM_HRM"
+        path: 'E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM_HRM'
+        pattern: "*.zip"
+      - name: "L60SANGTAM"
+        path: 'E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM'
+        pattern: "*.zip"
+```
+
+Each configured job provides:
+- **Custom Credentials**: Each job can read its own `credentials_file` and `token_file` (allowing different Google accounts or service identities per job).
+- **Multiple Sources**: Define multiple folders per job; the engine sequentially finds the latest matching archive in each folder and uploads it.
+- **Smart Diff**: Computes local MD5 and checks Google Drive metadata, skipping unchanged uploads and updating modified files in place.
+- **Flexible Scheduling**: Supports both `schedule_hours: <int>` (interval) and standard `cron: "0 2 * * *"` expressions.
+
+---
+
 ## Running as a Service with Mise Daemons (Production)
 
 This project is configured with [`mise daemons`](https://mise.jdx.dev) and Pitchfork for supervised background process management in production:

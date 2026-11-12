@@ -13,6 +13,7 @@ from auth import get_drive_service
 from config import BackupInputParams, settings
 from core import Trigger, get_app, get_logger, register_pipeline, task
 from drive_sync import DriveSyncEngine
+from jobs import create_job_pipeline, load_all_jobs
 
 
 @task
@@ -54,7 +55,11 @@ async def sync_google_drive(params: BackupInputParams) -> dict:
     return summary.model_dump()
 
 
-# Register the backup pipeline and its APScheduler timeline trigger
+# Register all custom jobs defined in jobs.yaml (e.g. L60SANGTAM)
+configured_jobs = load_all_jobs()
+job_pipelines = [register_pipeline(create_job_pipeline(job)) for job in configured_jobs]
+
+# Register default generic backup pipeline and its APScheduler timeline trigger
 pipeline = register_pipeline(
     id="google_drive_backup",
     name="Google Drive Backup",
@@ -81,8 +86,12 @@ def main():
     print("  Google Drive Automated Backup Service")
     print(f"  Environment: {settings.environment.upper()}")
     print(f"  Web Dashboard running at: http://{settings.host}:{settings.port}")
-    print(f"  Backup Source: {settings.source_dir.resolve()}")
     print(f"  Schedule: Every {settings.schedule_hours} hours")
+    if configured_jobs:
+        print("  Configured Jobs:")
+        for job in configured_jobs:
+            sched_info = f"every {job.schedule_hours}h" if job.schedule_hours else (f"cron {job.cron}" if job.cron else "manual")
+            print(f"    - [{job.id}] {job.name} ({len(job.sources)} sources, {sched_info})")
     print("=" * 65)
 
     uvicorn.run(

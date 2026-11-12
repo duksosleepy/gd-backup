@@ -1,0 +1,34 @@
+# GD Backup Jobs Configuration Example
+# Define custom backup jobs here. The service automatically creates and schedules
+# an orchestrator pipeline and dashboard cards for each configured job.
+
+jobs:
+  - id: "L60SANGTAM"
+    name: "L60SANGTAM"
+    description: "Backup latest .zip from L60SANGTAM_HRM and L60SANGTAM databases to Google Drive"
+    credentials_file: "credentials.json"
+    token_file: "token.json"
+    target_folder: "backup"
+    schedule_hours: 24
+    enabled: true
+    sources:
+      - name: "L60SANGTAM_HRM"
+        path: 'E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM_HRM'
+        pattern: "*.zip"
+      - name: "L60SANGTAM"
+        path: 'E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM'
+        pattern: "*.zip"
+
+  # Example of an additional custom job:
+  # - id: "ACCOUNTING_DAILY"
+  #   name: "Accounting Daily Backup"
+  #   description: "Uploads latest backup archives to Accounting folder on Drive"
+  #   credentials_file: "credentials_accounting.json"
+  #   token_file: "token_accounting.json"
+  #   target_folder: "accounting_backup"
+  #   cron: "0 2 * * *" # Every day at 2:00 AM
+  #   enabled: true
+  #   sources:
+  #     - name: "Accounting_DB"
+  #       path: 'D:\Backups\Accounting'
+  #       pattern: "*.zip"
