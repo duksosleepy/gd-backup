@@ -153,7 +153,7 @@ def test_current_month_folder_name_utc7():
 
     # 2026-10-31 20:00 UTC is already 2026-11-01 03:00 in UTC+7
     now = datetime(2026, 10, 31, 20, 0, tzinfo=timezone.utc)
-    assert current_month_folder_name("%Y-%m", now) == "11"
+    assert current_month_folder_name("%m", now) == "11"
 
 
 def test_month_folder_reused_if_exists():
