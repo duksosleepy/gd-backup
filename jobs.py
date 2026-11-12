@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import fnmatch
 import logging
 from pathlib import Path
@@ -17,6 +17,14 @@ from drive_sync import DriveSyncEngine, SyncSummary
 
 
 logger = logging.getLogger(__name__)
+
+
+UTC_PLUS_7 = timezone(timedelta(hours=7))
+
+
+def current_month_folder_name(fmt: str = "%Y-%m", now: Optional[datetime] = None) -> str:
+    """Month folder name based on the current date in UTC+7."""
+    return (now or datetime.now(UTC_PLUS_7)).astimezone(UTC_PLUS_7).strftime(fmt)
 
 
 class SourceFolderConfig(BaseModel):
@@ -63,6 +71,10 @@ class JobConfig(BaseModel):
     gdrive_parent_folder_id: Optional[str] = Field(
         default=None,
         description="Optional Google Drive parent folder ID (None uses configured root)",
+    )
+    month_folder_format: Optional[str] = Field(
+        default="%Y-%m",
+        description="strftime format of the per-month subfolder (UTC+7). Empty disables it.",
     )
     schedule_hours: Optional[int] = Field(
         default=24,
@@ -223,6 +235,16 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
             backup_folder_id,
         )
 
+        # Put the file in a folder named after the current month (UTC+7),
+        # reusing it if it already exists.
+        if job.month_folder_format:
+            month_name = current_month_folder_name(job.month_folder_format)
+            backup_folder_id = engine.get_or_create_subfolder(
+                folder_name=month_name,
+                parent_id=backup_folder_id,
+            )
+            log.info("Month folder '%s' ID: %s", month_name, backup_folder_id)
+
         # Sync the file to Drive
         remote_files = engine.list_remote_files(backup_folder_id)
         summary = SyncSummary(
@@ -250,6 +272,7 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
             "modified_time": mtime_str,
             "google_drive_folder": effective_target_folder,
             "google_drive_folder_id": backup_folder_id,
+            "month_folder": month_name if job.month_folder_format else None,
             "status": status_str,
         }
 

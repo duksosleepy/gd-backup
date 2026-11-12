@@ -145,3 +145,23 @@ def test_load_all_jobs_from_jobs_yaml():
     assert l60.cron == "0 5 * * *"
     assert l60.credentials_file == "credentials.json"
     assert len(l60.sources) == 2
+
+
+def test_current_month_folder_name_utc7():
+    from datetime import datetime, timezone
+    from jobs import current_month_folder_name
+
+    # 2026-10-31 20:00 UTC is already 2026-11-01 03:00 in UTC+7
+    now = datetime(2026, 10, 31, 20, 0, tzinfo=timezone.utc)
+    assert current_month_folder_name("%Y-%m", now) == "2026-11"
+
+
+def test_month_folder_reused_if_exists():
+    from unittest.mock import MagicMock
+    from drive_sync import DriveSyncEngine
+
+    service = MagicMock()
+    service.files().list().execute.return_value = {"files": [{"id": "M1", "name": "2026-11"}]}
+    engine = DriveSyncEngine(service=service)
+    assert engine.get_or_create_subfolder("2026-11", "PARENT") == "M1"
+    service.files().create.assert_not_called()
