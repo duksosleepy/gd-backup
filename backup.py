@@ -90,7 +90,7 @@ def main():
     if configured_jobs:
         print("  Configured Jobs:")
         for job in configured_jobs:
-            sched_info = f"every {job.schedule_hours}h" if job.schedule_hours else (f"cron {job.cron}" if job.cron else "manual")
+            sched_info = f"cron {job.cron}" if job.cron else (f"every {job.schedule_hours}h" if job.schedule_hours else "manual")
             print(f"    - [{job.id}] {job.name} ({len(job.sources)} sources, {sched_info})")
     print("=" * 65)
 

@@ -76,7 +76,7 @@ jobs:
     credentials_file: "credentials.json"
     token_file: "token.json"
     target_folder: "backup"
-    schedule_hours: 24
+    cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true
     sources:
       - name: "L60SANGTAM_HRM"

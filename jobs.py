@@ -276,11 +276,13 @@ def create_job_pipeline(job: JobConfig) -> Pipeline:
     # Configure schedule trigger
     triggers: List[Trigger] = []
     if job.cron:
+        trigger_name = "Daily at 5:00 AM" if job.cron == "0 5 * * *" else f"Cron ({job.cron})"
+        trigger_desc = "Automated backup every day at 5:00 AM" if job.cron == "0 5 * * *" else f"Scheduled via cron expression: {job.cron}"
         triggers.append(
             Trigger(
-                id=f"cron_trigger",
-                name=f"Cron ({job.cron})",
-                description=f"Scheduled via cron expression: {job.cron}",
+                id="cron_trigger",
+                name=trigger_name,
+                description=trigger_desc,
                 schedule=CronTrigger.from_crontab(job.cron),
             )
         )
@@ -314,14 +316,14 @@ jobs:
     credentials_file: "credentials.json"
     token_file: "token.json"
     target_folder: "backup"
-    schedule_hours: 24
+    cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true
     sources:
       - name: "L60SANGTAM_HRM"
-        path: 'E:\\LINKQ\\Database\\BACKUP\\SQL2017EN\\L60SANGTAM_HRM'
+        path: 'E:\\\\LINKQ\\\\Database\\\\BACKUP\\\\SQL2017EN\\\\L60SANGTAM_HRM'
         pattern: "*.zip"
       - name: "L60SANGTAM"
-        path: 'E:\\LINKQ\\Database\\BACKUP\\SQL2017EN\\L60SANGTAM'
+        path: 'E:\\\\LINKQ\\\\Database\\\\BACKUP\\\\SQL2017EN\\\\L60SANGTAM'
         pattern: "*.zip"
 """
 

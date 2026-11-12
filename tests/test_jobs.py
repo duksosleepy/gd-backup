@@ -110,11 +110,38 @@ def test_create_job_pipeline():
     assert pipeline.triggers[0].id == "scheduled_sync"
 
 
+def test_create_job_pipeline_with_cron():
+    job = JobConfig(
+        id="L60SANGTAM",
+        name="L60SANGTAM",
+        credentials_file="credentials.json",
+        token_file="token.json",
+        target_folder="backup",
+        cron="0 5 * * *",
+        sources=[
+            SourceFolderConfig(
+                name="L60SANGTAM_HRM",
+                path=r"E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM_HRM",
+            ),
+            SourceFolderConfig(
+                name="L60SANGTAM",
+                path=r"E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM",
+            ),
+        ],
+    )
+    pipeline = create_job_pipeline(job)
+    assert pipeline.id == "L60SANGTAM"
+    assert len(pipeline.triggers) == 1
+    assert pipeline.triggers[0].id == "cron_trigger"
+    assert "Daily at 5:00 AM" in pipeline.triggers[0].name
+
+
 def test_load_all_jobs_from_jobs_yaml():
     jobs = load_all_jobs(Path("jobs.yaml"))
     assert len(jobs) >= 1
     l60 = next((j for j in jobs if j.id == "L60SANGTAM"), None)
     assert l60 is not None
     assert l60.name == "L60SANGTAM"
+    assert l60.cron == "0 5 * * *"
     assert l60.credentials_file == "credentials.json"
     assert len(l60.sources) == 2
