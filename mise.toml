@@ -1,0 +1,45 @@
+[settings]
+experimental = true
+
+[tools]
+pitchfork = "2.32.2"
+pnpm = "10.33.2"
+python = "3.14.6"
+uv = "latest"
+
+[env]
+ENVIRONMENT = "production"
+NODE_ENV = "production"
+PYTHONOPTIMIZE = "1"
+HOST = "0.0.0.0"
+PORT = "8100"
+
+[tasks."build:frontend"]
+description = "Build web dashboard static assets for production"
+dir = "frontend"
+run = "pnpm build"
+
+[tasks.build]
+description = "Build all project assets for production"
+depends = ["build:frontend"]
+
+[tasks.test]
+description = "Run pytest test suite"
+run = "uv run pytest"
+
+[tasks.start]
+description = "Start all services in production"
+run = "mise daemons start"
+
+[daemons.backup]
+run = "exec uv run backup.py"
+ready_port = 8100
+ready_cmd = "curl -fsS http://127.0.0.1:8100/api/auth/whoami"
+
+[daemons.frontend]
+dir = "frontend"
+run = "exec pnpm exec vite preview --host 0.0.0.0 --port 4173 --outDir ../core/static"
+ready_port = 4173
+ready_cmd = "curl -fsS http://127.0.0.1:4173/"
+depends = ["backup"]
+

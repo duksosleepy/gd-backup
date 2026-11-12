@@ -8,3 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Database and secrets
+*.db
+*.db-*
+token.json
+credentials.json
+.env
+
+# Data
+data_to_backup/
+

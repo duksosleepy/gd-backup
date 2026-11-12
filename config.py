@@ -9,9 +9,15 @@ class BackupSettings(BaseSettings):
     """Application and backup settings loaded from environment or .env file."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", ".env.production"),
         env_file_encoding="utf-8",
         extra="ignore",
+    )
+
+    environment: str = Field(
+        default="production",
+        alias="ENVIRONMENT",
+        description="Application environment mode (production / development / test)",
     )
 
     source_dir: Path = Field(

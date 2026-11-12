@@ -79,6 +79,7 @@ def main():
     """Start the backup scheduler and web dashboard."""
     print("=" * 65)
     print("  Google Drive Automated Backup Service")
+    print(f"  Environment: {settings.environment.upper()}")
     print(f"  Web Dashboard running at: http://{settings.host}:{settings.port}")
     print(f"  Backup Source: {settings.source_dir.resolve()}")
     print(f"  Schedule: Every {settings.schedule_hours} hours")

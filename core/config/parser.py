@@ -29,16 +29,21 @@ class SettingsFileSource(PydanticBaseSettingsSource):
     def _load_config_file(self) -> dict:
         from dotenv import load_dotenv
 
-        env_file: Path = self.config.get("env_file")  # type: ignore
+        raw_env = self.config.get("env_file")
+        env_files = list(raw_env) if isinstance(raw_env, (list, tuple)) else [raw_env]
         encoding = self.config.get("env_file_encoding")
 
         # Load the env vars explicitly as pydantic reads env vars
         # locally without loading them into the system
-        load_dotenv(str(env_file))
+        for f in env_files:
+            if f is not None:
+                load_dotenv(str(f))
 
         # Find user's defined config file among the supported ones
+        first_env = env_files[0] if env_files else Path.cwd()
+        base_folder = first_env.parent if isinstance(first_env, Path) else Path(str(first_env)).parent
         for [ext, _] in SUPPORTED_CONFIG_FILES:
-            config_file = env_file.parent / f"{SETTINGS_FILE_NAME}.{ext}"
+            config_file = base_folder / f"{SETTINGS_FILE_NAME}.{ext}"
             if config_file.exists():
                 break
         else:

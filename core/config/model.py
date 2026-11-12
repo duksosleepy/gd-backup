@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=BASE_SETTINGS_FOLDER / ".env",
+        env_file=(BASE_SETTINGS_FOLDER / ".env", BASE_SETTINGS_FOLDER / ".env.production"),
         env_file_encoding="utf-8",
     )
 

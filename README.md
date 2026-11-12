@@ -63,6 +63,37 @@ Access the web dashboard in your browser:
 
 ---
 
+## Running as a Service with Mise Daemons (Production)
+
+This project is configured with [`mise daemons`](https://mise.jdx.dev) and Pitchfork for supervised background process management in production:
+
+### 1. Services Defined
+- **`backup`**: The Python FastAPI service + APScheduler background runner on port `8100` (`http://localhost:8100`).
+- **`frontend`**: The production web dashboard on port `4173` (`http://localhost:4173`), with live reverse proxying of API and WebSockets to the backend. It automatically depends on `backup` being healthy before starting.
+
+### 2. Service Management Commands
+
+```bash
+# Start all services in production mode
+mise daemons start
+
+# Check real-time daemon status
+mise daemons status
+
+# Inspect streaming daemon logs
+mise daemons logs
+
+# Stop all background services
+mise daemons stop
+```
+
+You can also run with explicit environment overlay:
+```bash
+mise -E production daemons start
+```
+
+---
+
 ## Running Tests
 
 Run the automated test suite using `pytest`:
