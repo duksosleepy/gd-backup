@@ -7,8 +7,8 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 import google_auth_httplib2
-import httplib2
 from googleapiclient.discovery import Resource, build
+from googleapiclient.http import build_http
 
 from config import BackupSettings, settings
 
@@ -79,7 +79,13 @@ def get_drive_service(
         credentials_file=credentials_file,
         token_file=token_file,
     )
-    # Default httplib2 timeout is 60s, too short for TLS handshakes on a busy
-    # link while uploading multi-GB files.
-    http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=300))
+    # Use googleapiclient.http.build_http() so HTTP 308 ("Resume Incomplete" in
+    # Google Drive resumable uploads) is excluded from httplib2.redirect_codes;
+    # plain httplib2.Http() treats 308 as a Permanent Redirect and raises
+    # RedirectMissingLocation after the first 32 MiB chunk of a large file.
+    # Also raise timeout from 60s to 300s for large chunk transfers.
+    raw_http = build_http()
+    raw_http.timeout = 300
+    raw_http.redirect_codes = raw_http.redirect_codes - {308}
+    http = google_auth_httplib2.AuthorizedHttp(creds, http=raw_http)
     return build("drive", "v3", http=http, cache_discovery=False)

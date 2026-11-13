@@ -98,3 +98,47 @@ def test_sync_directory_nonexistent_path(mock_drive_service, tmp_path: Path):
     summary = engine.sync_directory(non_existent)
     assert len(summary.errors) == 1
     assert "does not exist" in summary.errors[0]
+
+
+def test_get_drive_service_excludes_308_redirect_code(monkeypatch, test_settings):
+    import auth
+
+    fake_creds = MagicMock()
+    captured = {}
+
+    def fake_build(service_name, version, http=None, cache_discovery=False):
+        captured["http"] = http
+        return MagicMock()
+
+    monkeypatch.setattr(auth, "get_drive_credentials", lambda **kwargs: fake_creds)
+    monkeypatch.setattr(auth, "build", fake_build)
+
+    auth.get_drive_service(test_settings)
+
+    authed_http = captured["http"]
+    assert authed_http.timeout == 300
+    assert 308 not in authed_http.redirect_codes
+
+
+def test_upload_with_progress_retries_transient_transport_error(monkeypatch, mock_drive_service):
+    import drive_sync
+
+    monkeypatch.setattr(drive_sync.time, "sleep", lambda _: None)
+    engine = DriveSyncEngine(service=mock_drive_service)
+
+    status_50 = MagicMock()
+    status_50.progress.return_value = 0.5
+
+    request = MagicMock()
+    request._in_error_state = False
+    request.next_chunk.side_effect = [
+        (status_50, None),
+        ConnectionResetError("Connection reset by peer during chunk PUT"),
+        (None, {"id": "uploaded_large_file_id", "name": "large.zip"}),
+    ]
+
+    result = engine._upload_with_progress(request, "large.zip", 2 * 1024 * 1024 * 1024)
+    assert result == {"id": "uploaded_large_file_id", "name": "large.zip"}
+    assert request.next_chunk.call_count == 3
+    assert request._in_error_state is True
+

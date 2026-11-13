@@ -1,17 +1,31 @@
 import hashlib
+import http.client
 import logging
 import mimetypes
 from pathlib import Path
+import ssl
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from googleapiclient.discovery import Resource
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
+import httplib2
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
 UPLOAD_CHUNK_SIZE = 32 * 1024 * 1024  # must be a multiple of 256 KiB
+MAX_CHUNK_RETRIES = 5
+RETRYABLE_TRANSPORT_EXCEPTIONS = (
+    httplib2.HttpLib2Error,
+    http.client.HTTPException,
+    ssl.SSLError,
+    ConnectionError,
+    TimeoutError,
+    OSError,
+)
 
 
 class SyncSummary(BaseModel):
@@ -116,8 +130,30 @@ class DriveSyncEngine:
         """Run a resumable upload chunk by chunk, retrying transient errors."""
         response = None
         last_pct = -1
+        consecutive_errors = 0
         while response is None:
-            status, response = request.next_chunk(num_retries=5)
+            try:
+                status, response = request.next_chunk(num_retries=MAX_CHUNK_RETRIES)
+                consecutive_errors = 0
+            except (HttpError, *RETRYABLE_TRANSPORT_EXCEPTIONS) as exc:
+                if isinstance(exc, HttpError) and exc.resp.status not in (408, 429, 500, 502, 503, 504):
+                    raise
+                request._in_error_state = True
+                consecutive_errors += 1
+                if consecutive_errors > MAX_CHUNK_RETRIES:
+                    raise
+                backoff = min(2 ** consecutive_errors, 60)
+                self.log.warning(
+                    "Transient error uploading '%s' (attempt %d/%d): %s. Retrying in %ds...",
+                    filename,
+                    consecutive_errors,
+                    MAX_CHUNK_RETRIES,
+                    exc,
+                    backoff,
+                )
+                time.sleep(backoff)
+                continue
+
             if status:
                 pct = int(status.progress() * 100)
                 if pct // 10 != last_pct // 10:
