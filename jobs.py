@@ -27,6 +27,11 @@ def current_month_folder_name(fmt: str = "%m", now: Optional[datetime] = None) -
     return (now or datetime.now(UTC_PLUS_7)).astimezone(UTC_PLUS_7).strftime(fmt)
 
 
+def current_day_folder_name(fmt: str = "%d", now: Optional[datetime] = None) -> str:
+    """Day folder name based on the current date in UTC+7."""
+    return (now or datetime.now(UTC_PLUS_7)).astimezone(UTC_PLUS_7).strftime(fmt)
+
+
 class SourceFolderConfig(BaseModel):
     """Configuration for an individual backup source directory."""
 
@@ -76,6 +81,10 @@ class JobConfig(BaseModel):
         default="%m",
         description="strftime format of the per-month subfolder (UTC+7). Empty disables it.",
     )
+    day_folder_format: Optional[str] = Field(
+        default="%d",
+        description="strftime format of the per-day subfolder (UTC+7). Empty disables it.",
+    )
     schedule_hours: Optional[int] = Field(
         default=24,
         description="Scheduled interval in hours (used if cron is not set)",
@@ -111,21 +120,15 @@ class JobsFileConfig(BaseModel):
 class JobRunParams(BaseModel):
     """Parameters exposed in the Web UI for manual trigger executions."""
 
-    target_folder: Optional[str] = Field(
-        default=None,
-        description="Optional override for destination folder name on Google Drive",
-    )
     gdrive_parent_folder_id: Optional[str] = Field(
         default=None,
+        title="Folder parent id",
         description="Optional override for parent Google Drive folder ID",
     )
     credentials_file: Optional[str] = Field(
         default=None,
+        title="Credential file",
         description="Optional override for client secrets JSON file",
-    )
-    dry_run: bool = Field(
-        default=False,
-        description="If True, inspects and logs latest files without uploading to Drive",
     )
 
 
@@ -186,28 +189,11 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
             mtime_str,
         )
 
-        effective_target_folder = (
-            params.target_folder
-            if params and params.target_folder
-            else job.target_folder
-        )
         effective_parent_id = (
             params.gdrive_parent_folder_id
             if params and params.gdrive_parent_folder_id is not None
             else (job.gdrive_parent_folder_id or settings.gdrive_folder_id)
         )
-        is_dry_run = params.dry_run if params else False
-
-        if is_dry_run:
-            log.info("[DRY RUN] Would upload '%s' to Google Drive folder '%s'", latest_file.name, effective_target_folder)
-            return {
-                "source": task_name,
-                "file": latest_file.name,
-                "size_mb": round(file_size_mb, 2),
-                "modified_time": mtime_str,
-                "status": "dry_run",
-            }
-
         effective_creds_file = (
             params.credentials_file
             if params and params.credentials_file
@@ -225,23 +211,24 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
         engine = DriveSyncEngine(service=service, log=log)
 
         # If a Drive folder ID was given (UI / job / settings), that folder is
-        # the destination itself. Otherwise fall back to the named target folder.
-        if effective_parent_id and not (params and params.target_folder):
+        # the destination parent. Otherwise fall back to the named target folder.
+        if effective_parent_id:
             backup_folder_id = effective_parent_id
-            log.info("Using given Google Drive folder ID: %s", backup_folder_id)
+            log.info("Using given Google Drive parent folder ID: %s", backup_folder_id)
         else:
             backup_folder_id = engine.get_or_create_subfolder(
-                folder_name=effective_target_folder,
-                parent_id=effective_parent_id,
+                folder_name=job.target_folder,
+                parent_id=None,
             )
             log.info(
-                "Destination Google Drive folder '%s' ID: %s",
-                effective_target_folder,
+                "Destination Google Drive parent folder '%s' ID: %s",
+                job.target_folder,
                 backup_folder_id,
             )
 
         # Put the file in a folder named after the current month (UTC+7),
         # reusing it if it already exists.
+        month_name = None
         if job.month_folder_format:
             month_name = current_month_folder_name(job.month_folder_format)
             backup_folder_id = engine.get_or_create_subfolder(
@@ -249,6 +236,17 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
                 parent_id=backup_folder_id,
             )
             log.info("Month folder '%s' ID: %s", month_name, backup_folder_id)
+
+        # Put the file in a nested folder named after the day of current date (UTC+7),
+        # reusing it if it already exists -> parent folder -> month -> day (e.g. abc/11/20)
+        day_name = None
+        if job.day_folder_format:
+            day_name = current_day_folder_name(job.day_folder_format)
+            backup_folder_id = engine.get_or_create_subfolder(
+                folder_name=day_name,
+                parent_id=backup_folder_id,
+            )
+            log.info("Day folder '%s' ID: %s", day_name, backup_folder_id)
 
         # Sync the file to Drive
         remote_files = engine.list_remote_files(backup_folder_id)
@@ -275,9 +273,10 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
             "file": latest_file.name,
             "size_mb": round(file_size_mb, 2),
             "modified_time": mtime_str,
-            "google_drive_folder": effective_target_folder,
+            "google_drive_folder": job.target_folder,
             "google_drive_folder_id": backup_folder_id,
-            "month_folder": month_name if job.month_folder_format else None,
+            "month_folder": month_name,
+            "day_folder": day_name,
             "status": status_str,
         }
 

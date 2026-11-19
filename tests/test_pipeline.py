@@ -52,9 +52,12 @@ def test_api_l60sangtam_schema():
 
     schema = response.json()
     assert "properties" in schema
-    assert "target_folder" in schema["properties"]
+    assert "gdrive_parent_folder_id" in schema["properties"]
     assert "credentials_file" in schema["properties"]
-    assert "dry_run" in schema["properties"]
+    assert "target_folder" not in schema["properties"]
+    assert "dry_run" not in schema["properties"]
+    assert schema["properties"]["gdrive_parent_folder_id"]["title"] == "Folder parent id"
+    assert schema["properties"]["credentials_file"]["title"] == "Credential file"
 
 
 def test_api_input_schema():

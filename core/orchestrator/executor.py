@@ -155,9 +155,13 @@ async def execute_task_instance(
 
             # Prepare arguments using the TaskRun's context/inputs determined by the Orchestrator
             # The Orchestrator should have resolved all upstream tasks' data into task_run.context
+            dict_params = None
             if task_run.context:
                 dict_params = task_run.context.get("params", None)
+            if dict_params is None and pipeline_run and pipeline_run.input_params:
+                dict_params = pipeline_run.input_params
 
+            if dict_params is not None:
                 if pipeline.params:
                     # Pydantic models always need a dict input, so provide one as default if the dict_params is None
                     # typically because the pipeline was triggered by a trigger with no params
@@ -165,6 +169,8 @@ async def execute_task_instance(
                 else:
                     # TODO: This should raise at least a warning
                     pipeline_params = dict_params
+            elif pipeline.params:
+                pipeline_params = pipeline.params.model_validate({})
             else:
                 pipeline_params = None
 

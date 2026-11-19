@@ -276,6 +276,7 @@ class _Orchestrator:
                     pipeline,
                     task_run.pipeline_run,
                     downstream_task,
+                    resolved_context=task_run.context,
                 )
 
             else:

@@ -156,12 +156,41 @@ def test_current_month_folder_name_utc7():
     assert current_month_folder_name("%m", now) == "11"
 
 
-def test_month_folder_reused_if_exists():
+def test_current_day_folder_name_utc7():
+    from datetime import datetime, timezone
+    from jobs import current_day_folder_name
+
+    # 2026-11-19 20:00 UTC is 2026-11-20 03:00 in UTC+7
+    now = datetime(2026, 11, 19, 20, 0, tzinfo=timezone.utc)
+    assert current_day_folder_name("%d", now) == "20"
+
+
+def test_month_and_day_folder_hierarchy():
     from unittest.mock import MagicMock
     from drive_sync import DriveSyncEngine
 
     service = MagicMock()
-    service.files().list().execute.return_value = {"files": [{"id": "M1", "name": "11"}]}
+    # Mocking: parent -> month (11) -> day (20)
+    service.files().list().execute.side_effect = [
+        {"files": [{"id": "MONTH_ID", "name": "11"}]},
+        {"files": [{"id": "DAY_ID", "name": "20"}]},
+    ]
     engine = DriveSyncEngine(service=service)
-    assert engine.get_or_create_subfolder("11", "PARENT") == "M1"
-    service.files().create.assert_not_called()
+
+    month_id = engine.get_or_create_subfolder("11", "PARENT_ID")
+    assert month_id == "MONTH_ID"
+
+    day_id = engine.get_or_create_subfolder("20", month_id)
+    assert day_id == "DAY_ID"
+
+
+def test_job_run_params_fields():
+    from jobs import JobRunParams
+
+    fields = JobRunParams.model_fields
+    assert "gdrive_parent_folder_id" in fields
+    assert "credentials_file" in fields
+    assert "target_folder" not in fields
+    assert "dry_run" not in fields
+    assert fields["gdrive_parent_folder_id"].title == "Folder parent id"
+    assert fields["credentials_file"].title == "Credential file"
