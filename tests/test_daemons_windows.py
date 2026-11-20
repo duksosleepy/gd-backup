@@ -47,3 +47,8 @@ def test_mise_daemons_windows_compatibility(config_path):
         assert "ready_port" in daemon_cfg, (
             f"Daemon '{name}' in {config_path} must define 'ready_port' for socket readiness"
         )
+
+        # Verify boot_start is enabled for automatic startup on system boot
+        assert daemon_cfg.get("boot_start") is True, (
+            f"Daemon '{name}' in {config_path} should have boot_start = true"
+        )

@@ -7,7 +7,6 @@ from core import orchestrator
 def test_pipeline_registration():
     pipelines = orchestrator.pipelines
     assert "L60SANGTAM" in pipelines
-    assert "google_drive_backup" in pipelines
 
     l60 = pipelines["L60SANGTAM"]
     assert l60.name == "L60SANGTAM"
@@ -15,13 +14,6 @@ def test_pipeline_registration():
     assert l60.tasks[0].name == "Backup L60SANGTAM_HRM"
     assert l60.tasks[1].name == "Backup L60SANGTAM"
     assert len(l60.triggers) == 1
-
-    pipeline = pipelines["google_drive_backup"]
-    assert pipeline.name == "Google Drive Backup"
-    assert len(pipeline.tasks) == 1
-    assert pipeline.tasks[0].id == "sync_google_drive"
-    assert len(pipeline.triggers) == 1
-    assert pipeline.triggers[0].id == "scheduled_sync"
 
 
 def test_api_list_pipelines():
@@ -31,18 +23,12 @@ def test_api_list_pipelines():
 
     data = response.json()
     assert isinstance(data, list)
-    assert len(data) >= 2
+    assert len(data) >= 1
 
     l60 = next((p for p in data if p["id"] == "L60SANGTAM"), None)
     assert l60 is not None
     assert l60["name"] == "L60SANGTAM"
     assert len(l60["tasks"]) == 2
-
-    pipeline = next((p for p in data if p["id"] == "google_drive_backup"), None)
-    assert pipeline is not None
-    assert pipeline["name"] == "Google Drive Backup"
-    assert len(pipeline["triggers"]) == 1
-    assert pipeline["triggers"][0]["id"] == "scheduled_sync"
 
 
 def test_api_l60sangtam_schema():
@@ -60,15 +46,24 @@ def test_api_l60sangtam_schema():
     assert schema["properties"]["credentials_file"]["title"] == "Credential file"
 
 
-def test_api_input_schema():
+def test_api_configured_job_parent_id_schema():
+    from jobs import JobConfig, create_job_pipeline
+    from core import register_pipeline
+
+    custom_job = JobConfig(
+        id="CUSTOM_PIPELINE_TEST",
+        name="Custom Pipeline Test",
+        parent_id="PRECONFIGURED_PARENT_ID",
+        sources=[r"E:\Test"],
+    )
+    register_pipeline(create_job_pipeline(custom_job))
+
     client = TestClient(backup.app)
-    response = client.get("/api/pipelines/google_drive_backup/input-schema")
+    response = client.get("/api/pipelines/CUSTOM_PIPELINE_TEST/input-schema")
     assert response.status_code == 200
 
     schema = response.json()
-    assert "properties" in schema
-    assert "source_dir" in schema["properties"]
-    assert "gdrive_folder_id" in schema["properties"]
+    assert schema["properties"]["gdrive_parent_folder_id"]["default"] == "PRECONFIGURED_PARENT_ID"
 
 
 def test_web_spa_root():

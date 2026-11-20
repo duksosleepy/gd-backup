@@ -75,7 +75,7 @@ jobs:
     description: "Backup latest .zip from L60SANGTAM_HRM and L60SANGTAM databases to Google Drive"
     credentials_file: "credentials.json"
     token_file: "token.json"
-    target_folder: "backup"
+    parent_id: "" # Optional Google Drive parent folder ID (e.g. from folder URL)
     cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true
     sources:
@@ -88,9 +88,10 @@ jobs:
 ```
 
 Each configured job provides:
+- **Parent Folder ID (`parent_id`)**: Specify a target Google Drive folder ID directly in `jobs.yaml` / `jobs.yml`. Both manual and scheduled automation runs consistently read this ID, and manual runs will auto-populate and persist overrides to keep all runs synchronized.
 - **Custom Credentials**: Each job can read its own `credentials_file` and `token_file` (allowing different Google accounts or service identities per job).
 - **Multiple Sources**: Define multiple folders per job; the engine sequentially finds the latest matching archive in each folder and uploads it.
-- **Smart Diff**: Computes local MD5 and checks Google Drive metadata, skipping unchanged uploads and updating modified files in place.
+- **Smart Diff & Daily File Check**: Checks the destination `month/day` folder on Google Drive. If the folder already contains 2 files (or `expected_daily_files` / number of sources), or if the file already exists, it immediately skips the send file flow without redundant local MD5 hashing or API uploads.
 - **Flexible Scheduling**: Supports both `schedule_hours: <int>` (interval) and standard `cron: "0 2 * * *"` expressions.
 
 ---
@@ -135,6 +136,26 @@ For convenience on Windows, you can double-click or run from CMD / PowerShell:
 - `status_daemons.bat`: Checks daemon statuses (`mise daemons status`).
 - `stop_daemons.bat`: Stops all background daemons (`mise daemons stop`).
 - `run_backup.bat`: Runs standalone directly via `uv run backup.py`.
+
+### 5. Auto-Start on System Boot (`pitchfork boot enable` & `boot_start = true`)
+Both daemons (`backup` and `frontend`) in [`mise.toml`](file:///home/duk/code/gd-backup/mise.toml) and [`mise.production.toml`](file:///home/duk/code/gd-backup/mise.production.toml) have `boot_start = true` configured.
+
+- **Enable Auto-Start on Login / Boot**:
+  ```bash
+  # Enable user-level auto-start on login:
+  mise exec -- pitchfork boot enable
+
+  # Or enable system-level service on boot (requires admin / sudo):
+  sudo pitchfork boot enable
+  ```
+- **Check Boot Status**:
+  ```bash
+  mise exec -- pitchfork boot status
+  ```
+- **Disable Auto-Start**:
+  ```bash
+  mise exec -- pitchfork boot disable
+  ```
 
 ---
 

@@ -69,13 +69,17 @@ class JobConfig(BaseModel):
         default="token.json",
         description="Path to Google Drive OAuth user token file",
     )
-    target_folder: str = Field(
-        default="backup",
-        description="Destination folder name on Google Drive",
+    parent_id: Optional[str] = Field(
+        default=None,
+        description="Optional Google Drive parent folder ID (e.g. from folder URL)",
     )
     gdrive_parent_folder_id: Optional[str] = Field(
         default=None,
-        description="Optional Google Drive parent folder ID (None uses configured root)",
+        description="Optional Google Drive parent folder ID (alias for parent_id)",
+    )
+    target_folder: Optional[str] = Field(
+        default=None,
+        description="Optional legacy destination folder name on Google Drive",
     )
     month_folder_format: Optional[str] = Field(
         default="%m",
@@ -85,6 +89,10 @@ class JobConfig(BaseModel):
         default="%d",
         description="strftime format of the per-day subfolder (UTC+7). Empty disables it.",
     )
+    expected_daily_files: Optional[int] = Field(
+        default=None,
+        description="Expected number of files in the day folder (defaults to number of sources, e.g. 2). If day folder already has this many files, upload flow is skipped.",
+    )
     schedule_hours: Optional[int] = Field(
         default=24,
         description="Scheduled interval in hours (used if cron is not set)",
@@ -93,7 +101,33 @@ class JobConfig(BaseModel):
         default=None,
         description="Optional cron schedule expression (e.g. '0 2 * * *')",
     )
+    run_on_startup: bool = Field(
+        default=False,
+        description="Whether to also trigger this job immediately when the server starts",
+    )
     enabled: bool = Field(default=True, description="Whether this job is active")
+
+    @model_validator(mode="before")
+    @classmethod
+    def harmonize_parent_id(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            pid = data.get("parent_id")
+            if pid is None or (isinstance(pid, str) and not pid.strip()):
+                pid = data.get("gdrive_parent_folder_id")
+            if isinstance(pid, str):
+                pid = pid.strip() or None
+            data["parent_id"] = pid
+            data["gdrive_parent_folder_id"] = pid
+        return data
+
+    @model_validator(mode="after")
+    def sync_parent_id(self) -> "JobConfig":
+        pid = self.parent_id or self.gdrive_parent_folder_id
+        if isinstance(pid, str):
+            pid = pid.strip() or None
+        self.parent_id = pid
+        self.gdrive_parent_folder_id = pid
+        return self
 
     @field_validator("sources", mode="before")
     def parse_sources(cls, v):
@@ -130,6 +164,45 @@ class JobRunParams(BaseModel):
         title="Credential file",
         description="Optional override for client secrets JSON file",
     )
+    force_upload: bool = Field(
+        default=False,
+        title="Force upload",
+        description="Bypass folder file count/existence checks and force upload",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def harmonize_input_parent_id(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            pid = data.get("parent_id")
+            if pid is not None and "gdrive_parent_folder_id" not in data:
+                data["gdrive_parent_folder_id"] = pid
+        return data
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        return self.gdrive_parent_folder_id
+
+
+def make_job_run_params_class(job: JobConfig) -> type[JobRunParams]:
+    """Create a JobRunParams subclass with job-specific defaults for the Web UI."""
+    default_parent = job.parent_id or job.gdrive_parent_folder_id or None
+    default_creds = job.credentials_file or "credentials.json"
+
+    class ConfiguredJobRunParams(JobRunParams):
+        gdrive_parent_folder_id: Optional[str] = Field(
+            default=default_parent,
+            title="Folder parent id",
+            description="Optional override for parent Google Drive folder ID",
+        )
+        credentials_file: Optional[str] = Field(
+            default=default_creds,
+            title="Credential file",
+            description="Optional override for client secrets JSON file",
+        )
+
+    ConfiguredJobRunParams.__name__ = f"{job.id}RunParams"
+    return ConfiguredJobRunParams
 
 
 def find_latest_matching_file(directory: Path, pattern: str = "*.zip") -> Path:
@@ -167,7 +240,10 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
     task_id = f"{job.id.lower()}_{task_slug}"
 
     def run_backup_source(params: Optional[JobRunParams] = None) -> dict:
-        log = get_logger()
+        try:
+            log = get_logger()
+        except Exception:
+            log = logger
         log.info("=" * 60)
         log.info("[%s] Processing source: %s", job.name, task_name)
         log.info("Source directory: %s", source.path)
@@ -189,17 +265,54 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
             mtime_str,
         )
 
-        effective_parent_id = (
-            params.gdrive_parent_folder_id
-            if params and params.gdrive_parent_folder_id is not None
-            else (job.gdrive_parent_folder_id or settings.gdrive_folder_id)
-        )
+        # Reload latest config from disk if available to pick up live updates
+        current_job = job
+        try:
+            latest_jobs = load_all_jobs()
+            matching = next((j for j in latest_jobs if j.id == job.id), None)
+            if matching:
+                current_job = matching
+        except Exception as e:
+            log.warning("Could not reload latest job config from disk: %s", e)
+
+        user_parent_id = None
+        if params and params.gdrive_parent_folder_id and params.gdrive_parent_folder_id.strip():
+            user_parent_id = params.gdrive_parent_folder_id.strip()
+
+        job_parent_id = None
+        if current_job.parent_id and current_job.parent_id.strip():
+            job_parent_id = current_job.parent_id.strip()
+        elif current_job.gdrive_parent_folder_id and current_job.gdrive_parent_folder_id.strip():
+            job_parent_id = current_job.gdrive_parent_folder_id.strip()
+
+        settings_parent_id = None
+        if settings.gdrive_folder_id and settings.gdrive_folder_id.strip():
+            settings_parent_id = settings.gdrive_folder_id.strip()
+
+        effective_parent_id = user_parent_id or job_parent_id or settings_parent_id
+
+        # If user explicitly supplied a parent folder ID and it differs from job config, persist it
+        if user_parent_id and user_parent_id != job_parent_id:
+            try:
+                saved_path = update_job_parent_id_in_file(job.id, user_parent_id)
+                if saved_path:
+                    log.info(
+                        "[%s] Persisted new parent_id '%s' to configuration file (%s)",
+                        current_job.name,
+                        user_parent_id,
+                        saved_path,
+                    )
+                    current_job.parent_id = user_parent_id
+                    current_job.gdrive_parent_folder_id = user_parent_id
+            except Exception as e:
+                log.warning("Failed to persist parent_id to configuration file: %s", e)
+
         effective_creds_file = (
             params.credentials_file
             if params and params.credentials_file
-            else (job.credentials_file or str(settings.credentials_file))
+            else (current_job.credentials_file or str(settings.credentials_file))
         )
-        effective_token_file = job.token_file or str(settings.token_file)
+        effective_token_file = current_job.token_file or str(settings.token_file)
 
         # Connect to Google Drive API
         log.info("Connecting to Google Drive API using credentials '%s'...", effective_creds_file)
@@ -211,26 +324,29 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
         engine = DriveSyncEngine(service=service, log=log)
 
         # If a Drive folder ID was given (UI / job / settings), that folder is
-        # the destination parent. Otherwise fall back to the named target folder.
+        # the destination parent. Otherwise fall back to named target folder if set.
         if effective_parent_id:
             backup_folder_id = effective_parent_id
             log.info("Using given Google Drive parent folder ID: %s", backup_folder_id)
-        else:
+        elif current_job.target_folder:
             backup_folder_id = engine.get_or_create_subfolder(
-                folder_name=job.target_folder,
+                folder_name=current_job.target_folder,
                 parent_id=None,
             )
             log.info(
                 "Destination Google Drive parent folder '%s' ID: %s",
-                job.target_folder,
+                current_job.target_folder,
                 backup_folder_id,
             )
+        else:
+            backup_folder_id = None
+            log.info("No parent folder ID specified; storing directly in Google Drive root.")
 
         # Put the file in a folder named after the current month (UTC+7),
         # reusing it if it already exists.
         month_name = None
-        if job.month_folder_format:
-            month_name = current_month_folder_name(job.month_folder_format)
+        if current_job.month_folder_format:
+            month_name = current_month_folder_name(current_job.month_folder_format)
             backup_folder_id = engine.get_or_create_subfolder(
                 folder_name=month_name,
                 parent_id=backup_folder_id,
@@ -240,16 +356,94 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
         # Put the file in a nested folder named after the day of current date (UTC+7),
         # reusing it if it already exists -> parent folder -> month -> day (e.g. abc/11/20)
         day_name = None
-        if job.day_folder_format:
-            day_name = current_day_folder_name(job.day_folder_format)
+        if current_job.day_folder_format:
+            day_name = current_day_folder_name(current_job.day_folder_format)
             backup_folder_id = engine.get_or_create_subfolder(
                 folder_name=day_name,
                 parent_id=backup_folder_id,
             )
             log.info("Day folder '%s' ID: %s", day_name, backup_folder_id)
 
-        # Sync the file to Drive
+        # Check existing files in the destination month/day folder
         remote_files = engine.list_remote_files(backup_folder_id)
+
+        # Count non-folder files already in this folder
+        remote_file_items = [
+            f
+            for f in remote_files.values()
+            if f.get("mimeType") != "application/vnd.google-apps.folder"
+        ]
+        remote_file_count = len(remote_file_items)
+
+        # Target threshold: expected_daily_files or number of sources (minimum 2)
+        expected_count = (
+            current_job.expected_daily_files
+            if current_job.expected_daily_files is not None
+            else (len(current_job.sources) if current_job.sources else 2)
+        )
+        if expected_count < 2 and (not current_job.sources or len(current_job.sources) >= 2):
+            expected_count = 2
+
+        folder_label = (
+            f"{month_name}/{day_name}"
+            if month_name and day_name
+            else (day_name or month_name or "destination folder")
+        )
+
+        force_upload = getattr(params, "force_upload", False) if params else False
+
+        if not force_upload:
+            # Check 1: If 2 (or expected_count) files are already in this month/day folder, skip send file flow
+            if remote_file_count >= expected_count:
+                log.info(
+                    "[%s] Google Drive folder '%s' already contains %d files (expected %d). "
+                    "Skipping send file to Google Drive flow for '%s'.",
+                    current_job.name,
+                    folder_label,
+                    remote_file_count,
+                    expected_count,
+                    latest_file.name,
+                )
+                return {
+                    "source": task_name,
+                    "file": latest_file.name,
+                    "size_mb": round(file_size_mb, 2),
+                    "modified_time": mtime_str,
+                    "google_drive_folder": current_job.target_folder,
+                    "google_drive_folder_id": backup_folder_id,
+                    "month_folder": month_name,
+                    "day_folder": day_name,
+                    "status": "skipped",
+                    "reason": f"Folder already contains {remote_file_count} files (threshold: {expected_count})",
+                }
+
+            # Check 2: If this specific file is already present in this month/day folder, skip send file flow
+            existing_file = remote_files.get(latest_file.name)
+            if (
+                existing_file
+                and existing_file.get("mimeType") != "application/vnd.google-apps.folder"
+            ):
+                log.info(
+                    "[%s] File '%s' already exists in Google Drive folder '%s'. "
+                    "Skipping send file to Google Drive flow.",
+                    current_job.name,
+                    latest_file.name,
+                    folder_label,
+                )
+                return {
+                    "source": task_name,
+                    "file": latest_file.name,
+                    "size_mb": round(file_size_mb, 2),
+                    "modified_time": mtime_str,
+                    "google_drive_folder": current_job.target_folder,
+                    "google_drive_folder_id": backup_folder_id,
+                    "month_folder": month_name,
+                    "day_folder": day_name,
+                    "status": "skipped",
+                    "reason": f"File '{latest_file.name}' already exists in destination folder",
+                }
+
+        # Sync the file to Drive
         summary = SyncSummary(
             source_path=str(latest_file),
             target_folder_id=backup_folder_id,
@@ -266,14 +460,14 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
             if summary.files_uploaded
             else ("updated" if summary.files_updated else "skipped")
         )
-        log.info("[%s] Finished backup for '%s': %s", job.name, task_name, status_str)
+        log.info("[%s] Finished backup for '%s': %s", current_job.name, task_name, status_str)
 
         return {
             "source": task_name,
             "file": latest_file.name,
             "size_mb": round(file_size_mb, 2),
             "modified_time": mtime_str,
-            "google_drive_folder": job.target_folder,
+            "google_drive_folder": current_job.target_folder,
             "google_drive_folder_id": backup_folder_id,
             "month_folder": month_name,
             "day_folder": day_name,
@@ -310,7 +504,7 @@ def create_job_pipeline(job: JobConfig) -> Pipeline:
                 id="cron_trigger",
                 name=trigger_name,
                 description=trigger_desc,
-                schedule=CronTrigger.from_crontab(job.cron),
+                schedule=CronTrigger.from_crontab(job.cron, timezone=UTC_PLUS_7),
             )
         )
     elif job.schedule_hours and job.schedule_hours > 0:
@@ -327,9 +521,9 @@ def create_job_pipeline(job: JobConfig) -> Pipeline:
         id=job.id,
         name=job.name,
         description=job.description
-        or f"Automated backup for {job.name} uploading to '{job.target_folder}' folder in Google Drive.",
+        or f"Automated backup for {job.name} uploading to Google Drive.",
         tasks=tasks,
-        params=JobRunParams,
+        params=make_job_run_params_class(job),
         triggers=triggers,
     )
 
@@ -342,7 +536,7 @@ jobs:
     description: "Backup latest .zip from L60SANGTAM_HRM and L60SANGTAM databases to Google Drive"
     credentials_file: "credentials.json"
     token_file: "token.json"
-    target_folder: "backup"
+    parent_id: ""
     cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true
     sources:
@@ -355,30 +549,105 @@ jobs:
 """
 
 
+def get_active_jobs_file(config_path: Optional[Path] = None) -> Path:
+    """Determine the active jobs configuration file path.
+
+    Searches in order:
+    1. Explicit config_path (if passed and exists)
+    2. jobs.yml / jobs.yaml (prefers most recently modified if both exist)
+    3. jobs.json
+    """
+    if config_path and config_path.exists():
+        return config_path
+
+    existing = [p for p in [Path("jobs.yml"), Path("jobs.yaml"), Path("jobs.json")] if p.exists()]
+    if existing:
+        return max(existing, key=lambda p: p.stat().st_mtime)
+
+    default_path = Path("jobs.yml")
+    if not default_path.exists():
+        default_path.write_text(DEFAULT_JOBS_YAML, encoding="utf-8")
+    return default_path
+
+
+def update_job_parent_id_in_file(
+    job_id: str, new_parent_id: str, config_path: Optional[Path] = None
+) -> Optional[Path]:
+    """Update or insert parent_id for a given job in the active jobs.yaml / jobs.yml file.
+
+    Preserves formatting and comments by performing targeted line updates.
+    """
+    target_file = get_active_jobs_file(config_path)
+    if not target_file or not target_file.exists():
+        return None
+
+    content = target_file.read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+
+    job_start = -1
+    job_end = len(lines)
+    in_target_job = False
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("- id:") or stripped.startswith("id:"):
+            val = stripped.split(":", 1)[1].strip().strip("\"'")
+            if val == job_id:
+                in_target_job = True
+                job_start = i
+            elif in_target_job:
+                job_end = i
+                break
+
+    if not in_target_job:
+        return None
+
+    found_idx = -1
+    token_file_idx = -1
+    creds_file_idx = -1
+    for idx in range(job_start, job_end):
+        l_strip = lines[idx].strip()
+        if l_strip.startswith("parent_id:") or l_strip.startswith("gdrive_parent_folder_id:"):
+            found_idx = idx
+            break
+        if l_strip.startswith("token_file:"):
+            token_file_idx = idx
+        elif l_strip.startswith("credentials_file:"):
+            creds_file_idx = idx
+
+    indent = "    "
+    new_line = f'{indent}parent_id: "{new_parent_id}"\n'
+
+    if found_idx != -1:
+        lines[found_idx] = new_line
+    elif token_file_idx != -1:
+        lines.insert(token_file_idx + 1, new_line)
+    elif creds_file_idx != -1:
+        lines.insert(creds_file_idx + 1, new_line)
+    else:
+        lines.insert(job_start + 1, new_line)
+
+    target_file.write_text("".join(lines), encoding="utf-8")
+
+    # If the counterpart file exists (e.g. jobs.yml when jobs.yaml was edited, or vice-versa), update it too
+    other_ext = ".yml" if target_file.suffix == ".yaml" else ".yaml"
+    counterpart = target_file.with_suffix(other_ext)
+    if counterpart.exists() and counterpart.resolve() != target_file.resolve():
+        try:
+            update_job_parent_id_in_file(job_id, new_parent_id, counterpart)
+        except Exception:
+            pass
+
+    return target_file
+
+
 def load_all_jobs(config_path: Optional[Path] = None) -> List[JobConfig]:
     """Load all configured backup jobs from YAML/JSON file or initialize default.
 
-    Searches in order:
-    1. Explicit config_path (if passed)
-    2. jobs.yaml
-    3. jobs.yml
-    4. jobs.json
+    Searches in order of existing files (preferring most recently modified between jobs.yaml / jobs.yml).
     If none found, creates and loads a default jobs.yaml containing L60SANGTAM.
     """
-    candidates = [config_path] if config_path else [Path("jobs.yaml"), Path("jobs.yml"), Path("jobs.json")]
-
-    target_file = None
-    for cand in candidates:
-        if cand and cand.exists():
-            target_file = cand
-            break
-
-    if target_file is None:
-        # Create default jobs.yaml
-        default_path = Path("jobs.yaml")
-        default_path.write_text(DEFAULT_JOBS_YAML, encoding="utf-8")
-        target_file = default_path
-
+    target_file = get_active_jobs_file(config_path)
     raw_text = target_file.read_text(encoding="utf-8")
     parsed = yaml.safe_load(raw_text) or {}
 

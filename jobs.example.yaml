@@ -8,7 +8,7 @@ jobs:
     description: "Backup latest .zip from L60SANGTAM_HRM and L60SANGTAM databases to Google Drive"
     credentials_file: "credentials.json"
     token_file: "token.json"
-    target_folder: "backup"
+    parent_id: "" # Optional Google Drive parent folder ID (e.g. "1AbCdEfGhIjKlMnOpQrStUvWxYz")
     cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true
     sources:
@@ -18,17 +18,3 @@ jobs:
       - name: "L60SANGTAM"
         path: 'E:\LINKQ\Database\BACKUP\SQL2017EN\L60SANGTAM'
         pattern: "*.zip"
-
-  # Example of an additional custom job:
-  # - id: "ACCOUNTING_DAILY"
-  #   name: "Accounting Daily Backup"
-  #   description: "Uploads latest backup archives to Accounting folder on Drive"
-  #   credentials_file: "credentials_accounting.json"
-  #   token_file: "token_accounting.json"
-  #   target_folder: "accounting_backup"
-  #   cron: "0 2 * * *" # Every day at 2:00 AM
-  #   enabled: true
-  #   sources:
-  #     - name: "Accounting_DB"
-  #       path: 'D:\Backups\Accounting'
-  #       pattern: "*.zip"

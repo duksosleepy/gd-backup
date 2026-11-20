@@ -96,8 +96,8 @@ class _Orchestrator:
                 # run once instead of many times if the scheduler determines that the
                 # job should be run more than once in succession
                 coalesce=True,
-                # Jobs will be run even if they arrive 1 min late
-                misfire_grace_time=timedelta(minutes=1).seconds,
+                # Allow triggers to fire within 1 hour grace period if server starts or recovers late
+                misfire_grace_time=3600,
                 max_instances=10_000,
             )
 
