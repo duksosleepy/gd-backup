@@ -12,7 +12,7 @@ from core import get_app, register_pipeline
 from jobs import create_job_pipeline, load_all_jobs
 
 
-# Register all custom jobs defined in jobs.yml / jobs.yaml (e.g. L60SANGTAM)
+# Register all custom jobs defined in jobs.yml (e.g. L60SANGTAM)
 configured_jobs = load_all_jobs()
 job_pipelines = [register_pipeline(create_job_pipeline(job)) for job in configured_jobs]
 
@@ -55,7 +55,7 @@ def main():
     print(f"  Web Dashboard running at: http://{settings.host}:{settings.port}")
     print(f"  Schedule: Every {settings.schedule_hours} hours")
     if configured_jobs:
-        print("  Configured Jobs (from jobs.yml / jobs.yaml):")
+        print("  Configured Jobs (from jobs.yml):")
         for job in configured_jobs:
             sched_info = f"cron {job.cron}" if job.cron else (f"every {job.schedule_hours}h" if job.schedule_hours else "manual")
             print(f"    - [{job.id}] {job.name} ({len(job.sources)} sources, schedule: {sched_info})")

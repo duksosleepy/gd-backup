@@ -133,8 +133,8 @@ def test_create_job_pipeline_with_cron():
     assert "Daily at 5:00 AM" in pipeline.triggers[0].name
 
 
-def test_load_all_jobs_from_jobs_yaml():
-    jobs = load_all_jobs(Path("jobs.yaml"))
+def test_load_all_jobs_from_jobs_yml_root():
+    jobs = load_all_jobs(Path("jobs.yml"))
     assert len(jobs) >= 1
     l60 = next((j for j in jobs if j.id == "L60SANGTAM"), None)
     assert l60 is not None
@@ -245,7 +245,7 @@ jobs:
     cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true
 """
-    yaml_file = tmp_path / "jobs.yaml"
+    yaml_file = tmp_path / "jobs.yml"
     yaml_file.write_text(yaml_content, encoding="utf-8")
 
     # Insert parent_id
@@ -272,8 +272,8 @@ def test_automated_and_manual_run_parent_id_consistency(tmp_path, monkeypatch):
     src_dir.mkdir()
     (src_dir / "backup_2026.zip").write_text("content")
 
-    # Create dummy jobs.yaml
-    config_file = tmp_path / "jobs.yaml"
+    # Create dummy jobs.yml
+    config_file = tmp_path / "jobs.yml"
     config_file.write_text(
         f"""jobs:
   - id: "L60SANGTAM"
@@ -321,13 +321,13 @@ def test_automated_and_manual_run_parent_id_consistency(tmp_path, monkeypatch):
     first_call_manual = mock_engine.get_or_create_subfolder.call_args_list[0][1]["parent_id"]
     assert first_call_manual == "NEW_MANUAL_FOLDER_789"
 
-    # Verify that the manual run persisted this to jobs.yaml
+    # Verify that the manual run persisted this to jobs.yml
     saved_yaml = config_file.read_text(encoding="utf-8")
     assert 'parent_id: "NEW_MANUAL_FOLDER_789"' in saved_yaml
 
     mock_engine.get_or_create_subfolder.reset_mock()
 
-    # 3. Subsequent automated run reads the newly persisted value from jobs.yaml
+    # 3. Subsequent automated run reads the newly persisted value from jobs.yml
     res_subsequent_auto = task.run(params=None)
     first_call_subsequent = mock_engine.get_or_create_subfolder.call_args_list[0][1]["parent_id"]
     assert first_call_subsequent == "NEW_MANUAL_FOLDER_789"

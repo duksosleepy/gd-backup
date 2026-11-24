@@ -1,13 +1,17 @@
+import base64
+from email.message import EmailMessage
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Union
 
+import google.auth
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 import google_auth_httplib2
 from googleapiclient.discovery import Resource, build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import build_http
 
 from config import BackupSettings, settings
@@ -16,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 # Scopes required to upload and manage backup files created by this app
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+
+# Scope required to send notification emails via Gmail API
+GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
 def get_drive_credentials(
@@ -89,3 +96,98 @@ def get_drive_service(
     raw_http.redirect_codes = raw_http.redirect_codes - {308}
     http = google_auth_httplib2.AuthorizedHttp(creds, http=raw_http)
     return build("drive", "v3", http=http, cache_discovery=False)
+
+
+def get_gmail_credentials(
+    credentials_file: Optional[Path | str] = None,
+    token_file: Optional[Path | str] = None,
+) -> Credentials:
+    """Load or refresh Google OAuth credentials for Gmail API."""
+    creds: Optional[Credentials] = None
+
+    token_path = Path(token_file) if token_file else (Path("token.json") if Path("token.json").exists() else Path("tokens.json"))
+    creds_path = Path(credentials_file) if credentials_file else Path("credentials.json")
+
+    if token_path.exists():
+        try:
+            creds = Credentials.from_authorized_user_file(str(token_path), GMAIL_SCOPES)
+        except Exception as e:
+            logger.warning("Could not load token from %s: %s", token_path, e)
+            creds = None
+
+    if creds and creds.expired and creds.refresh_token:
+        logger.info("Refreshing expired Google credentials for Gmail...")
+        creds.refresh(Request())
+        with open(token_path, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
+        logger.info("Saved refreshed credentials to %s", token_path)
+
+    if not creds or not creds.valid:
+        try:
+            creds, _ = google.auth.default(scopes=GMAIL_SCOPES)
+        except Exception as e:
+            logger.debug("google.auth.default() failed: %s", e)
+
+    if not creds or not creds.valid:
+        if creds_path.exists():
+            logger.info("Starting local server OAuth flow to authorize Gmail...")
+            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), GMAIL_SCOPES)
+            creds = flow.run_local_server(port=0)
+            with open(token_path, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+            logger.info("Gmail token successfully saved to %s", token_path)
+
+    if not creds:
+        raise FileNotFoundError(
+            f"Google credentials not found at {creds_path} or {token_path} with Gmail send scope."
+        )
+
+    return creds
+
+
+def get_gmail_service(
+    credentials_file: Optional[Path | str] = None,
+    token_file: Optional[Path | str] = None,
+) -> Resource:
+    """Build and return an authenticated Gmail v1 service client."""
+    creds = get_gmail_credentials(
+        credentials_file=credentials_file,
+        token_file=token_file,
+    )
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+def gmail_send_message(
+    to: str,
+    subject: str,
+    content: str,
+    credentials_file: Optional[Path | str] = None,
+    token_file: Optional[Path | str] = None,
+) -> Optional[dict]:
+    """Create and send an email message via Gmail API."""
+    try:
+        service = get_gmail_service(
+            credentials_file=credentials_file,
+            token_file=token_file,
+        )
+        message = EmailMessage()
+        message.set_content(content)
+        message["To"] = to
+        message["Subject"] = subject
+
+        encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        create_message = {"raw": encoded_message}
+
+        send_message = (
+            service.users()
+            .messages()
+            .send(userId="me", body=create_message)
+            .execute()
+        )
+        print(f'Message Id: {send_message["id"]}')
+        return send_message
+    except HttpError as error:
+        print(f"An error occurred: {error}")
+        return None
+
+

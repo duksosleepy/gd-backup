@@ -9,7 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from auth import get_drive_service
+from auth import get_drive_service, gmail_send_message
 from config import settings
 from core import Pipeline, Trigger, get_logger
 from core.pipeline.tasks import Task
@@ -68,6 +68,10 @@ class JobConfig(BaseModel):
     token_file: Optional[str] = Field(
         default="token.json",
         description="Path to Google Drive OAuth user token file",
+    )
+    destination_email: Optional[str] = Field(
+        default=None,
+        description="Destination email address to notify when the job finishes",
     )
     parent_id: Optional[str] = Field(
         default=None,
@@ -164,6 +168,11 @@ class JobRunParams(BaseModel):
         title="Credential file",
         description="Optional override for client secrets JSON file",
     )
+    destination_email: Optional[str] = Field(
+        default=None,
+        title="Destination email",
+        description="Optional override for recipient email address",
+    )
     force_upload: bool = Field(
         default=False,
         title="Force upload",
@@ -188,6 +197,7 @@ def make_job_run_params_class(job: JobConfig) -> type[JobRunParams]:
     """Create a JobRunParams subclass with job-specific defaults for the Web UI."""
     default_parent = job.parent_id or job.gdrive_parent_folder_id or None
     default_creds = job.credentials_file or "credentials.json"
+    default_email = job.destination_email
 
     class ConfiguredJobRunParams(JobRunParams):
         gdrive_parent_folder_id: Optional[str] = Field(
@@ -199,6 +209,11 @@ def make_job_run_params_class(job: JobConfig) -> type[JobRunParams]:
             default=default_creds,
             title="Credential file",
             description="Optional override for client secrets JSON file",
+        )
+        destination_email: Optional[str] = Field(
+            default=default_email,
+            title="Destination email",
+            description="Optional override for recipient email address",
         )
 
     ConfiguredJobRunParams.__name__ = f"{job.id}RunParams"
@@ -408,6 +423,7 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
                     "source": task_name,
                     "file": latest_file.name,
                     "size_mb": round(file_size_mb, 2),
+                    "size_bytes": file_size_bytes,
                     "modified_time": mtime_str,
                     "google_drive_folder": current_job.target_folder,
                     "google_drive_folder_id": backup_folder_id,
@@ -434,6 +450,7 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
                     "source": task_name,
                     "file": latest_file.name,
                     "size_mb": round(file_size_mb, 2),
+                    "size_bytes": file_size_bytes,
                     "modified_time": mtime_str,
                     "google_drive_folder": current_job.target_folder,
                     "google_drive_folder_id": backup_folder_id,
@@ -466,6 +483,7 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
             "source": task_name,
             "file": latest_file.name,
             "size_mb": round(file_size_mb, 2),
+            "size_bytes": file_size_bytes,
             "modified_time": mtime_str,
             "google_drive_folder": current_job.target_folder,
             "google_drive_folder_id": backup_folder_id,
@@ -482,17 +500,215 @@ def make_source_backup_task(job: JobConfig, source: SourceFolderConfig) -> Task:
     )
 
 
+def format_file_size(size_bytes: int | float) -> str:
+    """Format file size in bytes to human-readable string (GB, MB, KB, B)."""
+    if size_bytes >= 1024 * 1024 * 1024:
+        val = size_bytes / (1024 * 1024 * 1024)
+        formatted = f"{val:.2f}"
+        if formatted.endswith(".00"):
+            formatted = formatted[:-3]
+        elif formatted.endswith("0"):
+            formatted = formatted[:-1]
+        return f"{formatted}GB"
+    elif size_bytes >= 1024 * 1024:
+        val = size_bytes / (1024 * 1024)
+        formatted = f"{val:.2f}"
+        if formatted.endswith(".00"):
+            formatted = formatted[:-3]
+        elif formatted.endswith("0"):
+            formatted = formatted[:-1]
+        return f"{formatted}MB"
+    elif size_bytes >= 1024:
+        val = size_bytes / 1024
+        formatted = f"{val:.2f}"
+        if formatted.endswith(".00"):
+            formatted = formatted[:-3]
+        elif formatted.endswith("0"):
+            formatted = formatted[:-1]
+        return f"{formatted}KB"
+    return f"{size_bytes}B"
+
+
+def build_backup_email_content(
+    files: List[dict],
+    completion_time: Optional[datetime] = None,
+) -> str:
+    """Build the Vietnamese email body for completed backup jobs.
+
+    Format:
+    Backup của ngày ... đã hoàn thành vào lúc ...
+    Với ... file:
+    A: ...GB
+    B: ...MB
+    ...
+    """
+    now = completion_time or datetime.now(UTC_PLUS_7)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc).astimezone(UTC_PLUS_7)
+    else:
+        now = now.astimezone(UTC_PLUS_7)
+
+    date_str = now.strftime("%d/%m/%Y")
+    time_str = now.strftime("%H:%M:%S")
+
+    lines = [
+        f"Backup của ngày {date_str} đã hoàn thành vào lúc {time_str}",
+        f"Với {len(files)} file:",
+    ]
+    for item in files:
+        file_name = item.get("file") or item.get("name") or "unknown"
+        size_bytes = item.get("size_bytes")
+        if size_bytes is None and item.get("size_mb") is not None:
+            size_bytes = int(item["size_mb"] * 1024 * 1024)
+        size_str = format_file_size(size_bytes or 0)
+        lines.append(f"{file_name}: {size_str}")
+
+    return "\n".join(lines)
+
+
+def make_email_notification_task(job: JobConfig, source_tasks: List[Task]) -> Task:
+    """Create an orchestrator task that sends a completion notification email via Gmail API."""
+    task_id = f"{job.id.lower()}_email_notification"
+    task_name = f"{job.name} Email Notification"
+
+    def run_send_email(
+        params: Optional[JobRunParams] = None,
+        context: Optional[Any] = None,
+    ) -> dict:
+        try:
+            log = get_logger()
+        except Exception:
+            log = logger
+
+        log.info("=" * 60)
+        log.info("[%s] Preparing backup completion email notification...", job.name)
+
+        # Reload latest config from disk if available to pick up live updates
+        current_job = job
+        try:
+            latest_jobs = load_all_jobs()
+            matching = next((j for j in latest_jobs if j.id == job.id), None)
+            if matching:
+                current_job = matching
+        except Exception as e:
+            log.warning("Could not reload latest job config from disk: %s", e)
+
+        dest_email = None
+        if params and params.destination_email and params.destination_email.strip():
+            dest_email = params.destination_email.strip()
+        elif current_job.destination_email:
+            dest_email = current_job.destination_email
+
+        if not dest_email:
+            log.info("[%s] No destination email configured. Skipping email notification.", current_job.name)
+            return {"status": "skipped", "reason": "No destination email configured"}
+
+        file_items = []
+        for src_task, src_cfg in zip(source_tasks, current_job.sources):
+            task_output = None
+            if context and hasattr(context, "get_output_data"):
+                try:
+                    task_output = context.get_output_data(src_task.id)
+                except Exception as e:
+                    log.warning("Could not retrieve task output for %s: %s", src_task.id, e)
+
+            if isinstance(task_output, dict) and task_output.get("file"):
+                file_items.append({
+                    "name": src_cfg.name,
+                    "file": task_output.get("file"),
+                    "size_mb": task_output.get("size_mb"),
+                    "size_bytes": task_output.get("size_bytes"),
+                })
+            else:
+                try:
+                    src_dir = Path(src_cfg.path)
+                    latest_f = find_latest_matching_file(src_dir, src_cfg.pattern)
+                    f_size = latest_f.stat().st_size
+                    file_items.append({
+                        "name": src_cfg.name,
+                        "file": latest_f.name,
+                        "size_mb": round(f_size / (1024 * 1024), 2),
+                        "size_bytes": f_size,
+                    })
+                except Exception as e:
+                    log.warning("[%s] Could not locate latest file for %s: %s", current_job.name, src_cfg.name, e)
+                    file_items.append({
+                        "name": src_cfg.name,
+                        "file": src_cfg.name or "unknown",
+                        "size_mb": 0,
+                        "size_bytes": 0,
+                    })
+
+        now = datetime.now(UTC_PLUS_7)
+        email_content = build_backup_email_content(file_items, completion_time=now)
+        date_str = now.strftime("%d/%m/%Y")
+        subject = f"[{current_job.name}] Backup của ngày {date_str} đã hoàn thành"
+
+        log.info("[%s] Sending backup completion email to %s", current_job.name, dest_email)
+        log.info("Subject: %s", subject)
+        log.info("Body:\n%s", email_content)
+
+        effective_creds_file = (
+            params.credentials_file
+            if params and params.credentials_file
+            else (current_job.credentials_file or str(settings.credentials_file))
+        )
+        effective_token_file = current_job.token_file or str(settings.token_file)
+
+        send_result = gmail_send_message(
+            to=dest_email,
+            subject=subject,
+            content=email_content,
+            credentials_file=effective_creds_file,
+            token_file=effective_token_file,
+        )
+
+        if send_result:
+            msg_id = send_result.get("id") if isinstance(send_result, dict) else send_result
+            log.info("[%s] Email sent successfully! Message Id: %s", current_job.name, msg_id)
+            return {
+                "status": "sent",
+                "message_id": msg_id,
+                "to": dest_email,
+                "content": email_content,
+            }
+        else:
+            log.error("[%s] Failed to send email to %s via Gmail API", current_job.name, dest_email)
+            return {
+                "status": "failed",
+                "to": dest_email,
+                "error": "Failed to send email via Gmail API",
+                "content": email_content,
+            }
+
+    return Task(
+        id=task_id,
+        name=task_name,
+        description=f"Sends backup completion notification email to {job.destination_email} via Gmail API",
+        run=run_send_email,
+    )
+
+
 def create_job_pipeline(job: JobConfig) -> Pipeline:
     """Construct a runnable Pipeline for the specified JobConfig."""
     if not job.sources:
         raise ValueError(f"Job '{job.id}' has no source directories configured.")
 
     # Create task for each source folder
-    tasks: List[Task] = [make_source_backup_task(job, src) for src in job.sources]
+    source_tasks: List[Task] = [make_source_backup_task(job, src) for src in job.sources]
 
     # Chain tasks sequentially: t0 >> t1 >> t2 ...
-    for i in range(len(tasks) - 1):
-        tasks[i] >> tasks[i + 1]
+    for i in range(len(source_tasks) - 1):
+        source_tasks[i] >> source_tasks[i + 1]
+
+    tasks: List[Task] = list(source_tasks)
+
+    # If destination_email is configured, append an email notification task downstream of all sources
+    if job.destination_email:
+        email_task = make_email_notification_task(job, source_tasks)
+        for src_task in source_tasks:
+            src_task >> email_task
+        tasks.append(email_task)
 
     # Configure schedule trigger
     triggers: List[Trigger] = []
@@ -536,6 +752,7 @@ jobs:
     description: "Backup latest .zip from L60SANGTAM_HRM and L60SANGTAM databases to Google Drive"
     credentials_file: "credentials.json"
     token_file: "token.json"
+    destination_email: "nguyenvankhan.itc@mail.com"
     parent_id: ""
     cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true
@@ -550,19 +767,9 @@ jobs:
 
 
 def get_active_jobs_file(config_path: Optional[Path] = None) -> Path:
-    """Determine the active jobs configuration file path.
-
-    Searches in order:
-    1. Explicit config_path (if passed and exists)
-    2. jobs.yml / jobs.yaml (prefers most recently modified if both exist)
-    3. jobs.json
-    """
+    """Determine the active jobs configuration file path (jobs.yml)."""
     if config_path and config_path.exists():
         return config_path
-
-    existing = [p for p in [Path("jobs.yml"), Path("jobs.yaml"), Path("jobs.json")] if p.exists()]
-    if existing:
-        return max(existing, key=lambda p: p.stat().st_mtime)
 
     default_path = Path("jobs.yml")
     if not default_path.exists():
@@ -573,7 +780,7 @@ def get_active_jobs_file(config_path: Optional[Path] = None) -> Path:
 def update_job_parent_id_in_file(
     job_id: str, new_parent_id: str, config_path: Optional[Path] = None
 ) -> Optional[Path]:
-    """Update or insert parent_id for a given job in the active jobs.yaml / jobs.yml file.
+    """Update or insert parent_id for a given job in jobs.yml file.
 
     Preserves formatting and comments by performing targeted line updates.
     """
@@ -628,25 +835,72 @@ def update_job_parent_id_in_file(
         lines.insert(job_start + 1, new_line)
 
     target_file.write_text("".join(lines), encoding="utf-8")
+    return target_file
 
-    # If the counterpart file exists (e.g. jobs.yml when jobs.yaml was edited, or vice-versa), update it too
-    other_ext = ".yml" if target_file.suffix == ".yaml" else ".yaml"
-    counterpart = target_file.with_suffix(other_ext)
-    if counterpart.exists() and counterpart.resolve() != target_file.resolve():
-        try:
-            update_job_parent_id_in_file(job_id, new_parent_id, counterpart)
-        except Exception:
-            pass
 
+def update_job_destination_email_in_file(
+    job_id: str, new_email: str, config_path: Optional[Path] = None
+) -> Optional[Path]:
+    """Update or insert destination_email for a given job in jobs.yml file.
+
+    Preserves formatting and comments by performing targeted line updates.
+    """
+    target_file = get_active_jobs_file(config_path)
+    if not target_file or not target_file.exists():
+        return None
+
+    content = target_file.read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+
+    job_start = -1
+    job_end = len(lines)
+    in_target_job = False
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("- id:") or stripped.startswith("id:"):
+            val = stripped.split(":", 1)[1].strip().strip("\"'")
+            if val == job_id:
+                in_target_job = True
+                job_start = i
+            elif in_target_job:
+                job_end = i
+                break
+
+    if not in_target_job:
+        return None
+
+    found_idx = -1
+    token_file_idx = -1
+    creds_file_idx = -1
+    for idx in range(job_start, job_end):
+        l_strip = lines[idx].strip()
+        if l_strip.startswith("destination_email:"):
+            found_idx = idx
+            break
+        if l_strip.startswith("token_file:"):
+            token_file_idx = idx
+        elif l_strip.startswith("credentials_file:"):
+            creds_file_idx = idx
+
+    indent = "    "
+    new_line = f'{indent}destination_email: "{new_email}"\n'
+
+    if found_idx != -1:
+        lines[found_idx] = new_line
+    elif token_file_idx != -1:
+        lines.insert(token_file_idx + 1, new_line)
+    elif creds_file_idx != -1:
+        lines.insert(creds_file_idx + 1, new_line)
+    else:
+        lines.insert(job_start + 1, new_line)
+
+    target_file.write_text("".join(lines), encoding="utf-8")
     return target_file
 
 
 def load_all_jobs(config_path: Optional[Path] = None) -> List[JobConfig]:
-    """Load all configured backup jobs from YAML/JSON file or initialize default.
-
-    Searches in order of existing files (preferring most recently modified between jobs.yaml / jobs.yml).
-    If none found, creates and loads a default jobs.yaml containing L60SANGTAM.
-    """
+    """Load all configured backup jobs from jobs.yml."""
     target_file = get_active_jobs_file(config_path)
     raw_text = target_file.read_text(encoding="utf-8")
     parsed = yaml.safe_load(raw_text) or {}

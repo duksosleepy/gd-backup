@@ -10,9 +10,10 @@ def test_pipeline_registration():
 
     l60 = pipelines["L60SANGTAM"]
     assert l60.name == "L60SANGTAM"
-    assert len(l60.tasks) == 2
+    assert len(l60.tasks) == 3
     assert l60.tasks[0].name == "Backup L60SANGTAM_HRM"
     assert l60.tasks[1].name == "Backup L60SANGTAM"
+    assert l60.tasks[2].name == "L60SANGTAM Email Notification"
     assert len(l60.triggers) == 1
 
 
@@ -28,7 +29,7 @@ def test_api_list_pipelines():
     l60 = next((p for p in data if p["id"] == "L60SANGTAM"), None)
     assert l60 is not None
     assert l60["name"] == "L60SANGTAM"
-    assert len(l60["tasks"]) == 2
+    assert len(l60["tasks"]) == 3
 
 
 def test_api_l60sangtam_schema():
@@ -40,10 +41,13 @@ def test_api_l60sangtam_schema():
     assert "properties" in schema
     assert "gdrive_parent_folder_id" in schema["properties"]
     assert "credentials_file" in schema["properties"]
+    assert "destination_email" in schema["properties"]
     assert "target_folder" not in schema["properties"]
     assert "dry_run" not in schema["properties"]
     assert schema["properties"]["gdrive_parent_folder_id"]["title"] == "Folder parent id"
     assert schema["properties"]["credentials_file"]["title"] == "Credential file"
+    assert schema["properties"]["destination_email"]["title"] == "Destination email"
+    assert schema["properties"]["destination_email"]["default"] == "nguyenvankhan.itc@mail.com"
 
 
 def test_api_configured_job_parent_id_schema():

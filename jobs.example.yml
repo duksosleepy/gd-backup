@@ -8,6 +8,7 @@ jobs:
     description: "Backup latest .zip from L60SANGTAM_HRM and L60SANGTAM databases to Google Drive"
     credentials_file: "credentials.json"
     token_file: "token.json"
+    destination_email: "nguyenvankhan.itc@mail.com" # Destination email to notify upon backup completion
     parent_id: "" # Optional Google Drive parent folder ID (e.g. "1AbCdEfGhIjKlMnOpQrStUvWxYz")
     cron: "0 5 * * *" # Daily at 5:00 AM
     enabled: true

@@ -63,9 +63,9 @@ Access the web dashboard in your browser:
 
 ---
 
-## Custom Backup Jobs (`jobs.yaml`)
+## Custom Backup Jobs (`jobs.yml`)
 
-Backup jobs are configured via [`jobs.yaml`](file:///home/duk/code/gd-backup/jobs.yaml). The service reads this file on startup and automatically constructs an independent orchestrator pipeline, scheduler trigger, and dashboard interface for each job.
+Backup jobs are configured via [`jobs.yml`](file:///home/duk/code/gd-backup/jobs.yml). The service reads this file on startup and automatically constructs an independent orchestrator pipeline, scheduler trigger, and dashboard interface for each job.
 
 ### Example: `L60SANGTAM`
 ```yaml
@@ -88,7 +88,7 @@ jobs:
 ```
 
 Each configured job provides:
-- **Parent Folder ID (`parent_id`)**: Specify a target Google Drive folder ID directly in `jobs.yaml` / `jobs.yml`. Both manual and scheduled automation runs consistently read this ID, and manual runs will auto-populate and persist overrides to keep all runs synchronized.
+- **Parent Folder ID (`parent_id`)**: Specify a target Google Drive folder ID directly in `jobs.yml`. Both manual and scheduled automation runs consistently read this ID, and manual runs will auto-populate and persist overrides to keep all runs synchronized.
 - **Custom Credentials**: Each job can read its own `credentials_file` and `token_file` (allowing different Google accounts or service identities per job).
 - **Multiple Sources**: Define multiple folders per job; the engine sequentially finds the latest matching archive in each folder and uploads it.
 - **Smart Diff & Daily File Check**: Checks the destination `month/day` folder on Google Drive. If the folder already contains 2 files (or `expected_daily_files` / number of sources), or if the file already exists, it immediately skips the send file flow without redundant local MD5 hashing or API uploads.
