@@ -19,10 +19,16 @@ from config import BackupSettings, settings
 logger = logging.getLogger(__name__)
 
 # Scopes required to upload and manage backup files created by this app
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 # Scope required to send notification emails via Gmail API
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+
+# Combined scopes required for full application operation (Google Drive + Gmail)
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.send",
+]
 
 
 def get_drive_credentials(
@@ -33,8 +39,8 @@ def get_drive_credentials(
     """Load, refresh, or initiate Google Drive OAuth credentials.
 
     If token_file exists, load credentials from it. If expired, automatically
-    refresh them. If not present, initiate the local server authorization flow
-    using credentials_file and save the newly minted token.
+    refresh them. If not present or missing required scopes, initiate the local server
+    authorization flow using credentials_file and save the newly minted token.
     """
     cfg = app_settings or settings
     creds: Optional[Credentials] = None
@@ -43,7 +49,14 @@ def get_drive_credentials(
 
     if token_path.exists():
         try:
-            creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+            creds = Credentials.from_authorized_user_file(str(token_path))
+            if not creds.has_scopes(DRIVE_SCOPES):
+                logger.warning(
+                    "Token at %s does not contain required Google Drive scope %s. Re-authorization required.",
+                    token_path,
+                    DRIVE_SCOPES,
+                )
+                creds = None
         except Exception as e:
             logger.warning("Could not load existing token from %s: %s", token_path, e)
             creds = None
@@ -63,14 +76,14 @@ def get_drive_credentials(
                     f"and save it as '{creds_path}'."
                 )
 
-            logger.info("Starting local server OAuth flow to authorize Google Drive...")
+            logger.info("Starting local server OAuth flow to authorize Google Drive & Gmail...")
             flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
             creds = flow.run_local_server(port=0)
 
             # Persist token for future headless runs
             with open(token_path, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
-            logger.info("Google Drive token successfully saved to %s", token_path)
+            logger.info("Google OAuth token successfully saved to %s", token_path)
 
     return creds
 
@@ -110,7 +123,14 @@ def get_gmail_credentials(
 
     if token_path.exists():
         try:
-            creds = Credentials.from_authorized_user_file(str(token_path), GMAIL_SCOPES)
+            creds = Credentials.from_authorized_user_file(str(token_path))
+            if not creds.has_scopes(GMAIL_SCOPES):
+                logger.warning(
+                    "Token at %s does not contain required Gmail scope %s. Re-authorization required.",
+                    token_path,
+                    GMAIL_SCOPES,
+                )
+                creds = None
         except Exception as e:
             logger.warning("Could not load token from %s: %s", token_path, e)
             creds = None
@@ -124,18 +144,18 @@ def get_gmail_credentials(
 
     if not creds or not creds.valid:
         try:
-            creds, _ = google.auth.default(scopes=GMAIL_SCOPES)
+            creds, _ = google.auth.default(scopes=SCOPES)
         except Exception as e:
             logger.debug("google.auth.default() failed: %s", e)
 
     if not creds or not creds.valid:
         if creds_path.exists():
-            logger.info("Starting local server OAuth flow to authorize Gmail...")
-            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), GMAIL_SCOPES)
+            logger.info("Starting local server OAuth flow to authorize Gmail and Google Drive...")
+            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
             creds = flow.run_local_server(port=0)
             with open(token_path, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
-            logger.info("Gmail token successfully saved to %s", token_path)
+            logger.info("Google OAuth token successfully saved to %s", token_path)
 
     if not creds:
         raise FileNotFoundError(
@@ -189,5 +209,40 @@ def gmail_send_message(
     except HttpError as error:
         print(f"An error occurred: {error}")
         return None
+
+
+if __name__ == "__main__":
+    import argparse
+
+    logging.basicConfig(level=logging.INFO)
+    parser = argparse.ArgumentParser(description="Authenticate Google Drive and Gmail API")
+    parser.add_argument(
+        "--credentials",
+        default="credentials.json",
+        help="Path to credentials.json file (default: credentials.json)",
+    )
+    parser.add_argument(
+        "--token",
+        default="token.json",
+        help="Path to token.json file (default: token.json)",
+    )
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("Initiating Google OAuth authorization for Drive and Gmail...")
+    print(f"Credentials file: {args.credentials}")
+    print(f"Token file:       {args.token}")
+    print(f"Required scopes:  {SCOPES}")
+    print("=" * 60)
+
+    flow = InstalledAppFlow.from_client_secrets_file(args.credentials, SCOPES)
+    new_creds = flow.run_local_server(port=0)
+
+    with open(args.token, "w", encoding="utf-8") as f:
+        f.write(new_creds.to_json())
+
+    print(f"Successfully authenticated and saved token to '{args.token}'!")
+    print(f"Granted scopes: {new_creds.scopes}")
+
 
 

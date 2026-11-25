@@ -8,7 +8,10 @@ from googleapiclient.errors import HttpError
 from httplib2 import Response
 
 from auth import (
+    DRIVE_SCOPES,
     GMAIL_SCOPES,
+    SCOPES,
+    get_drive_credentials,
     get_gmail_credentials,
     get_gmail_service,
     gmail_send_message,
@@ -207,3 +210,79 @@ def test_update_job_destination_email_in_file(tmp_path):
     assert saved_file == test_yaml
     new_text = test_yaml.read_text(encoding="utf-8")
     assert 'destination_email: "new_recipient@mail.com"' in new_text
+
+
+def test_get_gmail_credentials_with_valid_scopes(tmp_path):
+    token_file = tmp_path / "token.json"
+    token_content = """{
+        "token": "valid_token",
+        "refresh_token": "valid_refresh",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": "test_client_id",
+        "client_secret": "test_client_secret",
+        "scopes": ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/gmail.send"],
+        "expiry": "2099-01-01T00:00:00Z"
+    }"""
+    token_file.write_text(token_content, encoding="utf-8")
+
+    creds = get_gmail_credentials(token_file=token_file)
+    assert creds is not None
+    assert creds.has_scopes(GMAIL_SCOPES)
+
+
+def test_get_gmail_credentials_missing_scope_triggers_flow(tmp_path):
+    token_file = tmp_path / "token.json"
+    creds_file = tmp_path / "credentials.json"
+    token_content = """{
+        "token": "valid_token",
+        "refresh_token": "valid_refresh",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": "test_client_id",
+        "client_secret": "test_client_secret",
+        "scopes": ["https://www.googleapis.com/auth/drive.file"]
+    }"""
+    token_file.write_text(token_content, encoding="utf-8")
+    creds_file.write_text('{"installed": {"client_id": "cid", "client_secret": "sec"}}', encoding="utf-8")
+
+    mock_flow = MagicMock()
+    mock_new_creds = MagicMock()
+    mock_new_creds.valid = True
+    mock_new_creds.scopes = SCOPES
+    mock_new_creds.to_json.return_value = '{"token": "new"}'
+    mock_flow.run_local_server.return_value = mock_new_creds
+
+    with patch("auth.InstalledAppFlow.from_client_secrets_file", return_value=mock_flow) as mock_from_secrets:
+        creds = get_gmail_credentials(credentials_file=creds_file, token_file=token_file)
+        mock_from_secrets.assert_called_once_with(str(creds_file), SCOPES)
+        mock_flow.run_local_server.assert_called_once_with(port=0)
+        assert creds == mock_new_creds
+
+
+def test_get_drive_credentials_missing_scope_triggers_flow(tmp_path):
+    token_file = tmp_path / "token.json"
+    creds_file = tmp_path / "credentials.json"
+    token_content = """{
+        "token": "valid_token",
+        "refresh_token": "valid_refresh",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": "test_client_id",
+        "client_secret": "test_client_secret",
+        "scopes": ["https://www.googleapis.com/auth/gmail.send"]
+    }"""
+    token_file.write_text(token_content, encoding="utf-8")
+    creds_file.write_text('{"installed": {"client_id": "cid", "client_secret": "sec"}}', encoding="utf-8")
+
+    mock_flow = MagicMock()
+    mock_new_creds = MagicMock()
+    mock_new_creds.valid = True
+    mock_new_creds.scopes = SCOPES
+    mock_new_creds.to_json.return_value = '{"token": "new"}'
+    mock_flow.run_local_server.return_value = mock_new_creds
+
+    with patch("auth.InstalledAppFlow.from_client_secrets_file", return_value=mock_flow) as mock_from_secrets:
+        creds = get_drive_credentials(credentials_file=creds_file, token_file=token_file)
+        mock_from_secrets.assert_called_once_with(str(creds_file), SCOPES)
+        mock_flow.run_local_server.assert_called_once_with(port=0)
+        assert creds == mock_new_creds
+
+

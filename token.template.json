@@ -5,7 +5,8 @@
   "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
   "client_secret": "YOUR_CLIENT_SECRET",
   "scopes": [
-    "https://www.googleapis.com/auth/drive.file"
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.send"
   ],
   "universe_domain": "googleapis.com",
   "account": ""
